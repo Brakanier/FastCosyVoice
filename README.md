@@ -32,6 +32,8 @@
 
 `run.py` - inference with torch.compile (take time for compiling and warming)
 
+`benchmark_llm.py` - benchmark llm module in different configurations
+
 
 [Telegram](https://t.me/xVibeNot)
 
