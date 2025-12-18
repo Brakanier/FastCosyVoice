@@ -137,32 +137,48 @@ def init_weights(m, mean=0.0, std=0.01):
 # Repetition Aware Sampling in VALL-E 2
 def ras_sampling(weighted_scores, decoded_tokens, sampling, top_p=0.8, top_k=25, win_size=10, tau_r=0.1):
     top_ids = nucleus_sampling(weighted_scores, top_p=top_p, top_k=top_k)
-    rep_num = (torch.tensor(decoded_tokens[-win_size:]).to(weighted_scores.device) == top_ids).sum().item()
-    if rep_num >= win_size * tau_r:
-        top_ids = random_sampling(weighted_scores, decoded_tokens, sampling)
+    # Check for repetition - only look at recent tokens
+    if len(decoded_tokens) > 0:
+        recent = decoded_tokens[-win_size:] if len(decoded_tokens) >= win_size else decoded_tokens
+        rep_num = sum(1 for t in recent if t == top_ids)
+        if rep_num >= win_size * tau_r:
+            top_ids = random_sampling(weighted_scores)
     return top_ids
 
 
 def nucleus_sampling(weighted_scores, top_p=0.8, top_k=25):
-    prob, indices = [], []
-    cum_prob = 0.0
-    sorted_value, sorted_idx = weighted_scores.softmax(dim=0).sort(descending=True, stable=True)
-    for i in range(len(sorted_idx)):
-        # sampling both top-p and numbers.
-        if cum_prob < top_p and len(prob) < top_k:
-            cum_prob += sorted_value[i]
-            prob.append(sorted_value[i])
-            indices.append(sorted_idx[i])
-        else:
-            break
-    prob = torch.tensor(prob).to(weighted_scores)
-    indices = torch.tensor(indices, dtype=torch.long).to(weighted_scores.device)
-    top_ids = indices[prob.multinomial(1, replacement=True)].item()
+    """Vectorized nucleus (top-p + top-k) sampling - optimized for GPU."""
+    # Compute softmax probabilities
+    probs = weighted_scores.softmax(dim=0)
+    
+    # Sort by probability (descending)
+    sorted_probs, sorted_indices = probs.sort(descending=True)
+    
+    # Apply top-k: only consider first top_k tokens
+    sorted_probs = sorted_probs[:top_k]
+    sorted_indices = sorted_indices[:top_k]
+    
+    # Apply top-p (nucleus): find cutoff where cumsum exceeds top_p
+    cumsum_probs = sorted_probs.cumsum(dim=0)
+    # Create mask: keep tokens until cumsum exceeds top_p (inclusive)
+    # shift cumsum by one to include the token that crosses threshold
+    mask = torch.cat([torch.ones(1, device=cumsum_probs.device, dtype=torch.bool),
+                      cumsum_probs[:-1] < top_p])
+    
+    # Filter and renormalize
+    filtered_probs = sorted_probs[mask]
+    filtered_indices = sorted_indices[mask]
+    filtered_probs = filtered_probs / filtered_probs.sum()
+    
+    # Sample from filtered distribution
+    sampled_idx = torch.multinomial(filtered_probs, 1)
+    top_ids = filtered_indices[sampled_idx].item()
     return top_ids
 
 
-def random_sampling(weighted_scores, decoded_tokens, sampling):
-    top_ids = weighted_scores.softmax(dim=0).multinomial(1, replacement=True).item()
+def random_sampling(weighted_scores):
+    """Simple random sampling from full distribution."""
+    top_ids = weighted_scores.softmax(dim=0).multinomial(1).item()
     return top_ids
 
 

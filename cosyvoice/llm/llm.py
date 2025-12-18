@@ -228,9 +228,12 @@ class TransformerLM(torch.nn.Module):
 
 
 class Qwen2Encoder(torch.nn.Module):
-    def __init__(self, pretrain_path):
+    def __init__(self, pretrain_path, attn_implementation="sdpa"):
         super().__init__()
-        self.model = Qwen2ForCausalLM.from_pretrained(pretrain_path)
+        self.model = Qwen2ForCausalLM.from_pretrained(
+            pretrain_path,
+            attn_implementation=attn_implementation,
+        )
 
     def forward(self, xs: torch.Tensor, xs_lens: torch.Tensor):
         T = xs.size(1)
@@ -244,18 +247,31 @@ class Qwen2Encoder(torch.nn.Module):
         return outs.hidden_states[-1], masks.unsqueeze(1)
 
     def forward_one_step(self, xs, masks, cache=None):
-        input_masks = masks[:, -1, :]
-        outs = self.model(
+        # NOTE:
+        # - In autoregressive decoding, we only need the *last hidden state* and KV cache.
+        # - Calling Qwen2ForCausalLM with output_hidden_states=True is expensive: it materializes
+        #   hidden states for all layers and also computes LM head logits.
+        # - Instead, call the underlying base model (self.model.model) which returns last_hidden_state
+        #   by default and still supports KV cache.
+        #
+        # Accept both:
+        # - 3D causal masks (B, T, T) used by some callers, where we take the last row.
+        # - 2D attention masks (B, T) where 1/True means "keep".
+        if masks.dim() == 3:
+            attention_mask = masks[:, -1, :]
+        elif masks.dim() == 2:
+            attention_mask = masks
+        else:
+            raise ValueError(f"Unsupported masks.dim()={masks.dim()}, expected 2 or 3")
+
+        outs = self.model.model(
             inputs_embeds=xs,
-            attention_mask=input_masks,
-            output_hidden_states=True,
+            attention_mask=attention_mask,
             return_dict=True,
             use_cache=True,
             past_key_values=cache,
         )
-        xs = outs.hidden_states[-1]
-        new_cache = outs.past_key_values
-        return xs, new_cache
+        return outs.last_hidden_state, outs.past_key_values
 
 
 class Qwen2LM(TransformerLM):
@@ -504,9 +520,11 @@ class Qwen2LM(TransformerLM):
             out_tokens = []
             cache = None
             for i in range(max_len):
-                y_pred, cache = self.llm.forward_one_step(lm_input,
-                                                          masks=torch.tril(torch.ones((1, lm_input.shape[1], lm_input.shape[1]), device=lm_input.device)).to(torch.bool),
-                                                          cache=cache)
+                # HF models build the causal mask internally; we only need a 2D attention mask
+                # of valid tokens. Avoid constructing dense T×T tril masks (O(T^2) memory/time).
+                cache_len = 0 if cache is None else cache[0][0].size(2)
+                attn_mask = torch.ones((1, cache_len + lm_input.shape[1]), device=lm_input.device, dtype=torch.bool)
+                y_pred, cache = self.llm.forward_one_step(lm_input, masks=attn_mask, cache=cache)
                 logp = self.llm_decoder(y_pred[:, -1]).log_softmax(dim=-1)
                 top_ids = self.sampling_ids(logp.squeeze(dim=0), out_tokens, sampling, ignore_eos=True if i < min_len else False)
                 if top_ids in self.stop_token_ids:
@@ -574,10 +592,10 @@ class Qwen2LM(TransformerLM):
                         logging.info('not enough text token to decode, wait for more')
                         continue
                 while True:
-                    seq_len = lm_input.shape[1] if cache is None else lm_input.shape[1] + cache[0][0].size(2)
-                    y_pred, cache = self.llm.forward_one_step(lm_input,
-                                                              masks=torch.tril(torch.ones((1, seq_len, seq_len), device=lm_input.device)).to(torch.bool),
-                                                              cache=cache)
+                    cache_len = 0 if cache is None else cache[0][0].size(2)
+                    seq_len = cache_len + lm_input.shape[1]
+                    attn_mask = torch.ones((1, seq_len), device=lm_input.device, dtype=torch.bool)
+                    y_pred, cache = self.llm.forward_one_step(lm_input, masks=attn_mask, cache=cache)
                     logp = self.llm_decoder(y_pred[:, -1]).log_softmax(dim=-1)
                     if next_fill_index != -1 and len(out_tokens) == next_fill_index:
                         top_ids = self.fill_token
@@ -600,10 +618,10 @@ class Qwen2LM(TransformerLM):
         lm_input = torch.concat([lm_input, text_cache, task_id_emb], dim=1)
         logging.info('no more text token, decode until met eos')
         while True:
-            seq_len = lm_input.shape[1] if cache is None else lm_input.shape[1] + cache[0][0].size(2)
-            y_pred, cache = self.llm.forward_one_step(lm_input,
-                                                      masks=torch.tril(torch.ones((1, seq_len, seq_len), device=lm_input.device)).to(torch.bool),
-                                                      cache=cache)
+            cache_len = 0 if cache is None else cache[0][0].size(2)
+            seq_len = cache_len + lm_input.shape[1]
+            attn_mask = torch.ones((1, seq_len), device=lm_input.device, dtype=torch.bool)
+            y_pred, cache = self.llm.forward_one_step(lm_input, masks=attn_mask, cache=cache)
             logp = self.llm_decoder(y_pred[:, -1]).log_softmax(dim=-1)
             top_ids = self.sampling_ids(logp.squeeze(dim=0), out_tokens, sampling, ignore_eos=False)
             out_tokens.append(top_ids)
