@@ -49,7 +49,7 @@ Tested on **RTX 3090**
 | offline + fp16 + TRT Flow + TRT LLM | - | 0.1 |
 
 
-## Install
+### Install
 
 `uv add git+https://github.com/Brakanier/FastCosyVoice.git`
 
