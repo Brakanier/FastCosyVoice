@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Тестовый скрипт для проверки работы методов inference_instruct2 в CosyVoice3
+Test script for inference_instruct2 method in CosyVoice3
 
-Метод inference_instruct2:
-- Позволяет контролировать стиль генерации через текстовые инструкции
-- Требует аудио-референс (prompt_wav) для клонирования голоса
-- Формат instruct_text: "You are a helpful assistant. <инструкция><|endofprompt|>"
+inference_instruct2 method:
+- Allows controlling generation style through text instructions
+- Requires audio reference (prompt_wav) for voice cloning
+- instruct_text format: "You are a helpful assistant. <instruction><|endofprompt|>"
 
-Тесты проверяют:
-1. Инструкции на китайском языке
-2. Инструкции на английском языке
-3. Смешанные инструкции
+Tests verify:
+1. Instructions in Chinese
+2. Instructions in English
+3. Mixed instructions
 """
 
 import sys
@@ -23,45 +23,42 @@ from cosyvoice.utils.file_utils import logging
 
 def test_instruct2_examples():
     """
-    Тестирование различных инструкций с inference_instruct2
+    Testing various instructions with inference_instruct2
     """
     print("=" * 80)
-    print("Инициализация модели CosyVoice3...")
+    print("Initializing CosyVoice3 model...")
     print("=" * 80)
     
-    # Проверяем наличие модели
+    # Check if model exists
     model_dir = 'pretrained_models/Fun-CosyVoice3-0.5B'
     if not os.path.exists(model_dir):
-        logging.error(f"Модель не найдена: {model_dir}", exc_info=True)
+        logging.error(f"Model not found: {model_dir}", exc_info=True)
         return
     
-    # Проверяем наличие референсного аудио
+    # Check if reference audio exists
     prompt_wav = './refs/audio.wav'
     if not os.path.exists(prompt_wav):
-        logging.error(f"Референсное аудио не найдено: {prompt_wav}", exc_info=True)
+        logging.error(f"Reference audio not found: {prompt_wav}", exc_info=True)
         return
     
     try:
-        # Загружаем модель
+        # Load the model
         cosyvoice = AutoModel(model_dir=model_dir)
-        print(f"✓ Модель загружена успешно")
+        print(f"✓ Model loaded successfully")
         print(f"✓ Sample rate: {cosyvoice.sample_rate} Hz")
         print()
         
-        # Создаём директорию для результатов
+        # Create output directory
         output_dir = 'output/test_instruct'
         os.makedirs(output_dir, exist_ok=True)
-        print(f"✓ Результаты будут сохранены в: {output_dir}")
+        print(f"✓ Results will be saved to: {output_dir}")
         print()
         
-        # Тестовый текст на русском
+        # Test text in Russian
         test_text_ru = "Привет, меня зовут Фаст Кози. Сегодня прекрасная погода и я очень рада вас видеть."
-        
-        # Более длинный русский текст
-        test_text_ru_long = "Получив подарок на день рождения от друга издалека, я был приятно удивлён и глубоко тронут этим знаком внимания."
-        
+
         # ============================================================
-        # ТЕСТЫ С КИТАЙСКИМИ ИНСТРУКЦИЯМИ (русский текст)
+        # TESTS WITH CHINESE INSTRUCTIONS (Russian text)
         # ============================================================
         test_cases_chinese = [
             {
@@ -91,7 +88,7 @@ def test_instruct2_examples():
         ]
         
         # ============================================================
-        # ТЕСТЫ С АНГЛИЙСКИМИ ИНСТРУКЦИЯМИ (русский текст)
+        # TESTS WITH ENGLISH INSTRUCTIONS (Russian text)
         # ============================================================
         test_cases_english = [
             {
@@ -163,7 +160,7 @@ def test_instruct2_examples():
         ]
         
         # ============================================================
-        # ТЕСТЫ С РУССКИМИ ИНСТРУКЦИЯМИ (проверка)
+        # TESTS WITH RUSSIAN INSTRUCTIONS (experimental)
         # ============================================================
         test_cases_russian_instruct = [
             {
@@ -215,7 +212,7 @@ def test_instruct2_examples():
         
         for section_name, test_cases in all_tests:
             print("=" * 80)
-            print(f"СЕКЦИЯ: {section_name}")
+            print(f"SECTION: {section_name}")
             print("=" * 80)
             print()
             
@@ -226,12 +223,12 @@ def test_instruct2_examples():
                 description = test_case['description']
                 text = test_case['text']
                 
-                print(f"[{current_test}/{total_tests}] Тест: {description}")
-                print(f"    Инструкция: {instruction}")
-                print(f"    Текст: {text[:50]}..." if len(text) > 50 else f"    Текст: {text}")
+                print(f"[{current_test}/{total_tests}] Test: {description}")
+                print(f"    Instruction: {instruction}")
+                print(f"    Text: {text[:50]}..." if len(text) > 50 else f"    Text: {text}")
                 
                 try:
-                    # Генерируем аудио
+                    # Generate audio
                     for i, j in enumerate(cosyvoice.inference_instruct2(
                         tts_text=text,
                         instruct_text=instruction,
@@ -240,37 +237,37 @@ def test_instruct2_examples():
                     )):
                         output_path = f'{output_dir}/{name}_{i}.wav'
                         torchaudio.save(output_path, j['tts_speech'], cosyvoice.sample_rate)
-                        print(f"    ✓ Сохранено: {output_path}")
+                        print(f"    ✓ Saved: {output_path}")
                     
                     print()
                     
                 except Exception as e:
-                    logging.error(f"Ошибка при генерации {name}: {e}", exc_info=True)
+                    logging.error(f"Error generating {name}: {e}", exc_info=True)
                     print()
                     continue
         
         print("=" * 80)
-        print("✓ Все тесты завершены!")
-        print(f"✓ Результаты сохранены в: {output_dir}")
+        print("✓ All tests completed!")
+        print(f"✓ Results saved to: {output_dir}")
         print("=" * 80)
         
     except Exception as e:
-        logging.error(f"Критическая ошибка: {e}", exc_info=True)
+        logging.error(f"Critical error: {e}", exc_info=True)
         raise
 
 
 def print_supported_instructions():
     """
-    Выводит список всех поддерживаемых инструкций
+    Prints list of all supported instructions
     """
     print("\n")
     print("=" * 80)
-    print("ПОДДЕРЖИВАЕМЫЕ ИНСТРУКЦИИ для inference_instruct2")
+    print("SUPPORTED INSTRUCTIONS for inference_instruct2")
     print("=" * 80)
     print()
     
-    print("ОФИЦИАЛЬНЫЕ ИНСТРУКЦИИ НА КИТАЙСКОМ:")
-    print("  Диалекты:")
+    print("OFFICIAL CHINESE INSTRUCTIONS:")
+    print("  Dialects:")
     dialects = [
         "广东话", "东北话", "甘肃话", "贵州话", "河南话", "湖北话",
         "湖南话", "江西话", "闽南话", "宁夏话", "山西话", "陕西话",
@@ -279,49 +276,52 @@ def print_supported_instructions():
     for d in dialects:
         print(f"    - 请用{d}表达。")
     
-    print("\n  Скорость:")
+    print("\n  Speed:")
     print("    - 请用尽可能快地语速说一句话。")
     print("    - 请用尽可能慢地语速说一句话。")
     
-    print("\n  Эмоции:")
+    print("\n  Emotions:")
     print("    - 请非常开心地说一句话。")
     print("    - 请非常伤心地说一句话。")
     print("    - 请非常生气地说一句话。")
     
     print("\n" + "=" * 80)
-    print("ОФИЦИАЛЬНЫЕ ИНСТРУКЦИИ НА АНГЛИЙСКОМ:")
+    print("OFFICIAL ENGLISH INSTRUCTIONS:")
     print("  - Please say a sentence as loudly as possible.")
     print("  - Please say a sentence in a very soft voice.")
     
     print("\n" + "=" * 80)
-    print("ТЕСТИРУЕМЫЕ КАСТОМНЫЕ ИНСТРУКЦИИ НА АНГЛИЙСКОМ:")
+    print("TESTED CUSTOM ENGLISH INSTRUCTIONS:")
     print("  - Please speak as fast as possible.")
     print("  - Please speak very slowly and clearly.")
     print("  - Please say this sentence in a very happy and excited tone.")
     print("  - Please say this sentence in a sad and melancholic tone.")
     print("  - Please say this sentence in an angry and frustrated tone.")
     print("  - Please whisper this sentence.")
+    print("  - Please pronounce the letter R with a uvular trill, like a French R or a speech impediment where R sounds guttural.")
+    print("  - Please speak with a lisp, pronouncing S and Z sounds as TH.")
+    print("  - Please skip or omit the letter R completely when speaking.")
     
     print("\n" + "=" * 80)
-    print("ФОРМАТ ИНСТРУКЦИИ:")
-    print('  "You are a helpful assistant. <инструкция><|endofprompt|>"')
+    print("INSTRUCTION FORMAT:")
+    print('  "You are a helpful assistant. <instruction><|endofprompt|>"')
     print("=" * 80)
 
 
 def main():
     """
-    Главная функция
+    Main function
     """
-    print("\n🎤 ТЕСТИРОВАНИЕ INFERENCE_INSTRUCT2 🎤\n")
-    print("Цель: проверить работу инструкций на китайском и английском языках\n")
+    print("\n🎤 TESTING INFERENCE_INSTRUCT2 🎤\n")
+    print("Goal: test instructions in Chinese and English\n")
     
-    # Показываем поддерживаемые инструкции
+    # Show supported instructions
     print_supported_instructions()
     
-    # Запускаем тесты
+    # Run tests
     test_instruct2_examples()
     
-    print("\n✨ Готово! ✨\n")
+    print("\n✨ Done! ✨\n")
 
 
 if __name__ == '__main__':
