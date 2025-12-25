@@ -200,11 +200,7 @@ pip install ttsfrd-0.4.2-cp310-cp310-linux_x86_64.whl
 We strongly recommend using `Fun-CosyVoice3-0.5B` for better performance.
 Follow the code in `example.py` for detailed usage of each model.
 ```sh
-python example.py  # original way
-
-uv run python run.py  # faster way, tensorRT for flow and torch.compile for llm
-
-uv run python run_new.py # best speed, tensorRT for flow and tensorRT-LLM for llm
+python example.py
 ```
 
 ### Flow (DiT) onnx export for TensorRT optimization (for load_trt=True)
