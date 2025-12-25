@@ -13,13 +13,21 @@
 
 ### Examples:
 
-`run_basic.py` - fast way to try model, basic configuration
+``` sh
+run_basic.py  # fast way to try model, basic configuration
 
-`run.py` - inference with fp16, trt flow part and torch.compile (take time for compiling)
+run.py  # inference with fp16, trt flow part and torch.compile (take time for compiling)
 
-`run_fast.py` - inference with fp16, trt flow part, trt llm (take time for converting)
+run_fast.py  # inference with fp16, trt flow part, trt llm (take time for converting)
 
-`benchmark_llm.py` - benchmark llm module in different configurations
+run_offline.py  # inference in offline mode with long text
+
+run_instruct.py  # inference exaples with instructions
+
+benchmark_llm.py  # benchmark llm module in different configurations
+```
+
+
 
 Any questions you can discuss with author in [Telegram](https://t.me/xVibeNot)
 
