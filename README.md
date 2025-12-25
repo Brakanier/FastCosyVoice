@@ -43,9 +43,10 @@ Tested on **RTX 3090**
 
 | Configuration | TTFB | RTF |
 | :--- | :---: | :---: |
-| basic | 2.691 sec | 1.184 |
-| fp16 + TRT Flow + torch.compile | 0.706 sec | 0.487 |
-| fp16 + TRT Flow + TRT LLM | 0.470 sec | 0.245 |
+| stream + basic | 2.691 sec | 1.184 |
+| stream + fp16 + TRT Flow + torch.compile | 0.706 sec | 0.487 |
+| stream + fp16 + TRT Flow + TRT LLM | 0.470 sec | 0.245 |
+| offline + fp16 + TRT Flow + TRT LLM | - | 0.01 |
 
 
 
