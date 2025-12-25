@@ -310,7 +310,6 @@ def main():
     cosyvoice = FastCosyVoice3(
         model_dir=MODEL_DIR,
         fp16=True,
-        load_vllm=False,
         load_trt=USE_TRT_FLOW,       # TensorRT for Flow decoder (~2.5x speedup)
         load_trt_llm=USE_TRT_LLM,    # TensorRT-LLM for LLM (~3x speedup)
         trt_llm_dtype=TRT_LLM_DTYPE,
