@@ -28,7 +28,7 @@ import os
 import subprocess
 import threading
 import time
-from typing import Generator, Dict
+from typing import Generator
 
 import torch
 from tqdm import tqdm
@@ -133,7 +133,7 @@ class FastCosyVoice3:
             configs['allowed_special']
         )
         
-        self.sample_rate = configs['sample_rate']
+        self.sample_rate = configs['sample_rate']  # 24000
         
         # Check CUDA availability
         if not torch.cuda.is_available():
@@ -809,6 +809,26 @@ class FastCosyVoice3:
             os.path.join(self.model_dir, 'spk2info.pt')
         )
     
+    def _tensor_to_pcm_bytes(self, audio_tensor: torch.Tensor) -> bytes:
+        """
+        Convert audio tensor to raw PCM int16 bytes.
+        
+        Args:
+            audio_tensor: Audio tensor with shape [1, audio_len] or [audio_len], float values in [-1, 1]
+        
+        Returns:
+            Raw PCM bytes (int16, little-endian)
+        """
+        # Ensure 1D tensor
+        audio = audio_tensor.squeeze()
+        
+        # Clamp to [-1, 1] and convert to int16
+        audio = audio.clamp(-1.0, 1.0)
+        audio_int16 = (audio * 32767).to(torch.int16)
+        
+        # Convert to bytes (CPU, numpy, then tobytes)
+        return audio_int16.cpu().numpy().tobytes()
+    
     def inference_zero_shot_stream(
         self,
         tts_text: str,
@@ -816,7 +836,7 @@ class FastCosyVoice3:
         prompt_wav: str,
         zero_shot_spk_id: str = '',
         text_frontend: bool = True
-    ) -> Generator[Dict[str, torch.Tensor], None, None]:
+    ) -> Generator[bytes, None, None]:
         """
         Zero-shot streaming TTS inference with parallel pipeline.
         
@@ -833,7 +853,7 @@ class FastCosyVoice3:
             text_frontend: Whether to apply text normalization
         
         Yields:
-            Dict with 'tts_speech' key containing audio tensor [1, audio_len]
+            Raw PCM bytes (int16, little-endian, mono, sample_rate from model)
         """
         # Normalize prompt text
         prompt_text = self.frontend.text_normalize(
@@ -888,11 +908,12 @@ class FastCosyVoice3:
                     llm_end_flag=llm_end_flag,
                     **{k: v for k, v in model_input.items() if k.startswith('flow') or k.startswith('prompt_speech')}
                 ):
-                    speech_len = model_output['tts_speech'].shape[1] / self.sample_rate
+                    audio_tensor = model_output['tts_speech']
+                    speech_len = audio_tensor.shape[1] / self.sample_rate
                     elapsed = time.time() - start_time
                     rtf = elapsed / speech_len if speech_len > 0 else 0
                     logging.info(f'Yield speech len={speech_len:.3f}s, rtf={rtf:.3f}')
-                    yield model_output
+                    yield self._tensor_to_pcm_bytes(audio_tensor)
                     start_time = time.time()
                 
                 # Wait for LLM thread to finish
@@ -900,11 +921,12 @@ class FastCosyVoice3:
             else:
                 # Use PyTorch LLM with parallel pipeline
                 for model_output in self.model.tts_stream(**model_input):
-                    speech_len = model_output['tts_speech'].shape[1] / self.sample_rate
+                    audio_tensor = model_output['tts_speech']
+                    speech_len = audio_tensor.shape[1] / self.sample_rate
                     elapsed = time.time() - start_time
                     rtf = elapsed / speech_len if speech_len > 0 else 0
                     logging.info(f'Yield speech len={speech_len:.3f}s, rtf={rtf:.3f}')
-                    yield model_output
+                    yield self._tensor_to_pcm_bytes(audio_tensor)
                     start_time = time.time()
             
             # Note: model_input tensors freed automatically when out of scope
@@ -1005,7 +1027,7 @@ class FastCosyVoice3:
         zero_shot_spk_id: str = '',
         text_frontend: bool = True,
         speed: float = 1.0
-    ) -> Generator[Dict[str, torch.Tensor], None, None]:
+    ) -> Generator[bytes, None, None]:
         """
         Zero-shot non-streaming TTS inference.
         
@@ -1024,7 +1046,7 @@ class FastCosyVoice3:
             speed: Speech speed multiplier (1.0 = normal)
         
         Yields:
-            Dict with 'tts_speech' key containing audio tensor [1, audio_len]
+            Raw PCM bytes (int16, little-endian, mono, sample_rate from model)
             (yields one chunk per text segment after normalization/splitting)
         """
         # Normalize prompt text
@@ -1071,17 +1093,19 @@ class FastCosyVoice3:
                     **{k: v for k, v in model_input.items() if k.startswith('flow') or k.startswith('prompt_speech')}
                 )
                 
-                speech_len = model_output['tts_speech'].shape[1] / self.sample_rate
+                audio_tensor = model_output['tts_speech']
+                speech_len = audio_tensor.shape[1] / self.sample_rate
                 elapsed = time.time() - start_time
                 rtf = elapsed / speech_len if speech_len > 0 else 0
                 logging.info(f'Generated speech len={speech_len:.3f}s, rtf={rtf:.3f}')
-                yield model_output
+                yield self._tensor_to_pcm_bytes(audio_tensor)
             else:
                 # Use PyTorch LLM (non-streaming)
                 model_output = self.model.tts(**model_input, speed=speed)
                 
-                speech_len = model_output['tts_speech'].shape[1] / self.sample_rate
+                audio_tensor = model_output['tts_speech']
+                speech_len = audio_tensor.shape[1] / self.sample_rate
                 elapsed = time.time() - start_time
                 rtf = elapsed / speech_len if speech_len > 0 else 0
                 logging.info(f'Generated speech len={speech_len:.3f}s, rtf={rtf:.3f}')
-                yield model_output
+                yield self._tensor_to_pcm_bytes(audio_tensor)

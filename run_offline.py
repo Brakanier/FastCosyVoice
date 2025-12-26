@@ -20,12 +20,12 @@ import sys
 import time
 import os
 import logging
+import wave
 from pathlib import Path
 
 sys.path.append('third_party/Matcha-TTS')
 
 import torch
-import torchaudio
 from fastcosyvoice import FastCosyVoice3
 
 
@@ -296,12 +296,12 @@ def synthesize(
         dict with keys: total_time, audio_duration, rtf, segment_count
     """
     start_time = time.time()
-    audio_segments = []
+    audio_segments: list[bytes] = []
     segment_count = 0
 
     infer_ctx = torch.inference_mode() if USE_INFERENCE_MODE else torch.no_grad()
     with infer_ctx:
-        for model_output in cosyvoice.inference_zero_shot(
+        for pcm_bytes in cosyvoice.inference_zero_shot(
             tts_text=text,
             prompt_text=prompt_text,
             prompt_wav=REFERENCE_AUDIO,
@@ -309,25 +309,24 @@ def synthesize(
             speed=speed,
         ):
             segment_count += 1
-
-            # Audio should already be on CPU, but ensure it
-            speech = model_output['tts_speech']
-            if getattr(speech, "is_cuda", False):
-                speech = speech.detach().cpu()
-            else:
-                speech = speech.detach()
-            audio_segments.append(speech)
+            audio_segments.append(pcm_bytes)
     
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     
     total_time = time.time() - start_time
     
-    # Concatenate segments and save
+    # Concatenate segments and save as WAV
     if audio_segments:
-        full_audio = torch.cat(audio_segments, dim=1)
-        torchaudio.save(output_path, full_audio, sample_rate)
-        audio_duration = full_audio.shape[1] / sample_rate
+        full_pcm = b''.join(audio_segments)
+        # Save as WAV (PCM int16, mono)
+        with wave.open(output_path, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16-bit = 2 bytes
+            wf.setframerate(sample_rate)
+            wf.writeframes(full_pcm)
+        # Calculate duration from PCM bytes (2 bytes per sample, mono)
+        audio_duration = len(full_pcm) / 2 / sample_rate
     else:
         audio_duration = 0.0
     
