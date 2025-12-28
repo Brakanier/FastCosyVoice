@@ -87,9 +87,9 @@ INSTRUCTION = "You are a helpful assistant."
 USE_TRT_FLOW = True       # TensorRT for Flow decoder (~2.5x speedup)
 USE_TRT_LLM = True        # TensorRT-LLM for LLM (~3x speedup)
 TRT_LLM_DTYPE = 'bfloat16'  # bfloat16/float16/float32
-# Fraction of VRAM that TensorRT-LLM pre-reserves for KV-cache.
-# This is often the main memory consumer. Decrease if VRAM usage is high (e.g., 0.10-0.20).
-TRT_LLM_KV_CACHE_FRACTION = 0.10
+# Max tokens in KV-cache. 8192 tokens ≈ 100MB for Qwen2-0.5B.
+# Minimum needed: max_input_len + max_output_len = 512 + 2048 = 2560 tokens.
+TRT_LLM_KV_CACHE_TOKENS = 8192
 
 # Inference wrapper without autograd (reduces allocations and graph leak risk)
 USE_INFERENCE_MODE = True
@@ -312,7 +312,7 @@ def main():
         load_trt=USE_TRT_FLOW,       # TensorRT for Flow decoder (~2.5x speedup)
         load_trt_llm=USE_TRT_LLM,    # TensorRT-LLM for LLM (~3x speedup)
         trt_llm_dtype=TRT_LLM_DTYPE,
-        trt_llm_kv_cache_fraction=TRT_LLM_KV_CACHE_FRACTION,
+        trt_llm_kv_cache_tokens=TRT_LLM_KV_CACHE_TOKENS,
     )
     
     load_time = time.time() - load_start

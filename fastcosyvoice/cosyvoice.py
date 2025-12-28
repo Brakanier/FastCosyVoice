@@ -78,7 +78,7 @@ class FastCosyVoice3:
         trt_concurrent: int = 1,
         trt_llm_dtype: str = 'bfloat16',
         trt_llm_max_batch_size: int = 1,
-        trt_llm_kv_cache_fraction: float = 0.3,
+        trt_llm_kv_cache_tokens: int = 8192,
         flow_n_timesteps: int = 10,
     ):
         """
@@ -92,7 +92,7 @@ class FastCosyVoice3:
             trt_concurrent: Number of concurrent TRT contexts for Flow
             trt_llm_dtype: Data type for TRT-LLM (bfloat16, float16, float32)
             trt_llm_max_batch_size: Max batch size for TRT-LLM engine
-            trt_llm_kv_cache_fraction: GPU memory fraction for KV cache
+            trt_llm_kv_cache_tokens: Max tokens in KV cache (~100MB default, ~12KB/token)
             flow_n_timesteps: Number of diffusion steps for Flow (10=best quality, 5-6=faster)
         """
         self.model_dir = model_dir
@@ -197,7 +197,7 @@ class FastCosyVoice3:
             self._load_trt_llm(
                 dtype=trt_llm_dtype,
                 max_batch_size=trt_llm_max_batch_size,
-                kv_cache_fraction=trt_llm_kv_cache_fraction,
+                kv_cache_tokens=trt_llm_kv_cache_tokens,
             )
         
         del configs
@@ -207,7 +207,7 @@ class FastCosyVoice3:
         self,
         dtype: str = 'bfloat16',
         max_batch_size: int = 1,
-        kv_cache_fraction: float = 0.3,
+        kv_cache_tokens: int = 8192,
     ):
         """
         Load TensorRT-LLM for LLM inference.
@@ -218,7 +218,7 @@ class FastCosyVoice3:
         Args:
             dtype: Data type (bfloat16, float16, float32)
             max_batch_size: Maximum batch size
-            kv_cache_fraction: GPU memory fraction for KV cache
+            kv_cache_tokens: Max tokens in KV cache (~100MB default at 8192 tokens)
         """
         import json
         
@@ -324,8 +324,8 @@ class FastCosyVoice3:
             max_output_len=2048,
             enable_context_fmha_fp32_acc=False,
             max_batch_size=max_batch_size,
-            max_input_len=4096,
-            kv_cache_free_gpu_memory_fraction=kv_cache_fraction,
+            max_input_len=512,
+            max_tokens_in_paged_kv_cache=kv_cache_tokens,
             cuda_graph_mode=False,
             gather_generation_logits=False,
         )
@@ -582,8 +582,8 @@ class FastCosyVoice3:
                 '--checkpoint_dir', trt_weights_dir,
                 '--output_dir', trt_engines_dir,
                 '--max_batch_size', str(max_batch_size),
-                '--max_input_len', '4096',
-                '--max_num_tokens', '16384',
+                '--max_input_len', '512',
+                '--max_num_tokens', '2560',
                 '--gemm_plugin', dtype,
             ]
             
