@@ -15,11 +15,17 @@
 import re
 import regex
 chinese_char_pattern = re.compile(r'[\u4e00-\u9fff]+')
+cyrillic_char_pattern = re.compile(r'[\u0400-\u04ff]+')
 
 
 # whether contain chinese character
 def contains_chinese(text):
     return bool(chinese_char_pattern.search(text))
+
+
+# whether contain cyrillic (Russian, etc.) character
+def contains_cyrillic(text):
+    return bool(cyrillic_char_pattern.search(text))
 
 
 # replace special symbol
@@ -63,22 +69,31 @@ def spell_out_number(text: str, inflect_parser):
 # 2. cal sentence len according to lang
 # 3. split sentence according to puncatation
 def split_paragraph(text: str, tokenize, lang="zh", token_max_n=80, token_min_n=60, merge_len=20, comma_split=False):
+    # For Chinese, use character count (1 char ≈ 1 token)
+    # For other languages (en, ru), use actual token count from tokenizer
+    use_char_count = lang == "zh"
+    
     def calc_utt_length(_text: str):
-        if lang == "zh":
+        if use_char_count:
             return len(_text)
         else:
             return len(tokenize(_text))
 
     def should_merge(_text: str):
-        if lang == "zh":
+        if use_char_count:
             return len(_text) < merge_len
         else:
             return len(tokenize(_text)) < merge_len
 
+    # Punctuation for sentence splitting
+    # Include ellipsis (…) as sentence delimiter - common in Russian texts
     if lang == "zh":
-        pounc = ['。', '？', '！', '；', '：', '、', '.', '?', '!', ';']
+        pounc = ['。', '？', '！', '；', '：', '、', '.', '?', '!', ';', '…']
+    elif lang == "ru":
+        # Russian punctuation
+        pounc = ['.', '?', '!', ';', ':', '…']
     else:
-        pounc = ['.', '?', '!', ';', ':']
+        pounc = ['.', '?', '!', ';', ':', '…']
     if comma_split:
         pounc.extend(['，', ','])
 
@@ -87,6 +102,9 @@ def split_paragraph(text: str, tokenize, lang="zh", token_max_n=80, token_min_n=
             text += "。"
         else:
             text += "."
+    
+    # Handle three dots "..." as single delimiter by replacing with ellipsis
+    text = text.replace("...", "…")
 
     st = 0
     utts = []

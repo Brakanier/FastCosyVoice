@@ -33,7 +33,7 @@ except ImportError:
     from wetext import Normalizer as EnNormalizer
     use_ttsfrd = False
 from cosyvoice.utils.file_utils import logging, load_wav
-from cosyvoice.utils.frontend_utils import contains_chinese, replace_blank, replace_corner_mark, remove_bracket, spell_out_number, split_paragraph, is_only_punctuation
+from cosyvoice.utils.frontend_utils import contains_chinese, contains_cyrillic, replace_blank, replace_corner_mark, remove_bracket, spell_out_number, split_paragraph, is_only_punctuation
 
 
 class CosyVoiceFrontEnd:
@@ -145,6 +145,12 @@ class CosyVoiceFrontEnd:
                 text = remove_bracket(text)
                 text = re.sub(r'[，,、]+$', '。', text)
                 texts = list(split_paragraph(text, partial(self.tokenizer.encode, allowed_special=self.allowed_special), "zh", token_max_n=80,
+                                             token_min_n=60, merge_len=20, comma_split=False))
+            elif contains_cyrillic(text):
+                # Russian/Cyrillic text - use character-based splitting like Chinese
+                text = text.replace("\n", " ")
+                text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
+                texts = list(split_paragraph(text, partial(self.tokenizer.encode, allowed_special=self.allowed_special), "ru", token_max_n=80,
                                              token_min_n=60, merge_len=20, comma_split=False))
             else:
                 text = self.en_tn_model.normalize(text)
