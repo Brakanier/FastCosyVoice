@@ -102,7 +102,7 @@ class FastCosyVoice3Model:
         self.hift.load_state_dict(hift_state_dict, strict=True)
         self.hift.to(self.device).eval()
     
-    def get_trt_kwargs(self):
+    def get_trt_kwargs(self, fp16: bool = True):
         """Get TensorRT optimization profiles for Flow decoder."""
         # NOTE: max_shape must be large enough to handle prompt_feat + generated mel
         # For zero-shot with long reference audio (~30s) + long output (~60s), need ~6000 frames
@@ -110,7 +110,10 @@ class FastCosyVoice3Model:
         # `cosyvoice/flow/flow_matching.py::forward_estimator`.
         min_shape = [(2, 80, 4), (2, 1, 4), (2, 80, 4), (2,), (2, 80), (2, 80, 4)]
         opt_shape = [(2, 80, 1000), (2, 1, 1000), (2, 80, 1000), (2,), (2, 80), (2, 80, 1000)]
-        max_shape = [(2, 80, 6000), (2, 1, 6000), (2, 80, 6000), (2,), (2, 80), (2, 80, 6000)]
+        # FP32 requires more memory per element, so reduce max_shape to avoid OOM during TRT build
+        # FP32: max 3000 frames (~37s audio), FP16: max 6000 frames (~75s audio)
+        max_frames = 6000 if fp16 else 3000
+        max_shape = [(2, 80, max_frames), (2, 1, max_frames), (2, 80, max_frames), (2,), (2, 80), (2, 80, max_frames)]
         input_names = ["x", "mask", "mu", "t", "spks", "cond"]
         return {'min_shape': min_shape, 'opt_shape': opt_shape, 'max_shape': max_shape, 'input_names': input_names}
     
@@ -129,7 +132,7 @@ class FastCosyVoice3Model:
 
         if not os.path.exists(flow_decoder_estimator_model) or os.path.getsize(flow_decoder_estimator_model) == 0:
             logging.info(f'Converting ONNX to TensorRT: {flow_decoder_onnx_model} -> {flow_decoder_estimator_model}')
-            convert_onnx_to_trt(flow_decoder_estimator_model, self.get_trt_kwargs(), flow_decoder_onnx_model, fp16)
+            convert_onnx_to_trt(flow_decoder_estimator_model, self.get_trt_kwargs(fp16), flow_decoder_onnx_model, fp16)
         
         del self.flow.decoder.estimator
         

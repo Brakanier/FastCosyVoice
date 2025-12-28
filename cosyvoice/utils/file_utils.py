@@ -218,14 +218,17 @@ def export_flow_decoder_estimator_onnx(
 
 def convert_onnx_to_trt(trt_model, trt_kwargs, onnx_model, fp16):
     import tensorrt as trt
-    logging.info("Converting onnx to trt...")
+    logging.info(f"Converting onnx to trt (fp16={fp16})...")
     network_flags = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
-    logger = trt.Logger(trt.Logger.INFO)
+    # Use WARNING level to see errors but not spam; switch to VERBOSE for debugging
+    logger = trt.Logger(trt.Logger.WARNING)
     builder = trt.Builder(logger)
     network = builder.create_network(network_flags)
     parser = trt.OnnxParser(network, logger)
     config = builder.create_builder_config()
-    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 32)  # 4GB
+    # FP32 needs more workspace memory for tactics; use 8GB for FP32, 4GB for FP16
+    workspace_size = 1 << 33 if not fp16 else 1 << 32  # 8GB or 4GB
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace_size)
     if fp16:
         config.set_flag(trt.BuilderFlag.FP16)
         # Precision constraints are needed if we want to force some layers to FP32 for numerical stability.
@@ -234,6 +237,11 @@ def convert_onnx_to_trt(trt_model, trt_kwargs, onnx_model, fp16):
             config.set_flag(trt.BuilderFlag.OBEY_PRECISION_CONSTRAINTS)
         elif hasattr(trt.BuilderFlag, "PREFER_PRECISION_CONSTRAINTS"):
             config.set_flag(trt.BuilderFlag.PREFER_PRECISION_CONSTRAINTS)
+    else:
+        # FP32 mode: enable TF32 for better performance on Ampere+ GPUs
+        if hasattr(trt.BuilderFlag, "TF32"):
+            config.set_flag(trt.BuilderFlag.TF32)
+            logging.info("TensorRT: TF32 enabled for FP32 build")
     profile = builder.create_optimization_profile()
     # load onnx model
     with open(onnx_model, "rb") as f:
@@ -283,7 +291,30 @@ def convert_onnx_to_trt(trt_model, trt_kwargs, onnx_model, fp16):
         except Exception:
             output_tensor.dtype = trt.DataType.FLOAT
     config.add_optimization_profile(profile)
+    logging.info(f"TensorRT: building engine for {onnx_model}...")
     engine_bytes = builder.build_serialized_network(network, config)
+    if engine_bytes is None:
+        # Gather diagnostic info
+        try:
+            import torch
+            gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A"
+            gpu_mem = torch.cuda.get_device_properties(0).total_memory // (1024**3) if torch.cuda.is_available() else 0
+        except Exception:
+            gpu_name, gpu_mem = "Unknown", 0
+        trt_version = getattr(trt, '__version__', 'unknown')
+        
+        error_msg = (
+            f"TensorRT failed to build the engine (fp16={fp16}).\n"
+            f"TensorRT version: {trt_version}, GPU: {gpu_name} ({gpu_mem}GB)\n"
+            f"ONNX model: {onnx_model}\n"
+            "Possible causes:\n"
+            "  - Insufficient GPU memory (try closing other applications)\n"
+            "  - ONNX model contains unsupported operations\n"
+            "  - TensorRT version incompatibility\n"
+            "Check TensorRT logs above for specific error details."
+        )
+        logging.error(error_msg, exc_info=True)
+        raise RuntimeError(error_msg)
     # save trt engine
     with open(trt_model, "wb") as f:
         f.write(engine_bytes)
