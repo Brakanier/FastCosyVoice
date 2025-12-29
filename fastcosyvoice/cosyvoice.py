@@ -199,6 +199,14 @@ class FastCosyVoice3:
                 max_batch_size=trt_llm_max_batch_size,
                 kv_cache_tokens=trt_llm_kv_cache_tokens,
             )
+            # Fail if TRT-LLM was requested but failed to load
+            if not self.trt_llm_loaded:
+                raise RuntimeError(
+                    'TensorRT-LLM failed to load. Check the logs above for details. '
+                    'Common issues: missing MPI library (install with: apt install libopenmpi-dev), '
+                    'or tensorrt_llm not installed (pip install tensorrt-llm). '
+                    'Set load_trt_llm=False to use PyTorch LLM instead.'
+                )
         
         del configs
         logging.info(f'FastCosyVoice3 initialized with fp16={fp16}, load_trt={load_trt}, load_trt_llm={load_trt_llm}')
@@ -226,10 +234,11 @@ class FastCosyVoice3:
             import tensorrt_llm
             from tensorrt_llm.runtime import ModelRunnerCpp
             from transformers import AutoTokenizer
-        except ImportError:
+        except (ImportError, RuntimeError) as e:
             logging.warning(
-                'TensorRT-LLM not installed, using PyTorch LLM. '
-                'Install with: pip install tensorrt-llm',
+                f'TensorRT-LLM import failed: {e}. '
+                'Common issues: missing MPI library (install with: apt install libopenmpi-dev), '
+                'or tensorrt_llm not installed (pip install tensorrt-llm).',
                 exc_info=True
             )
             return
