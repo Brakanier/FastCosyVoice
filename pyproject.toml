@@ -26,6 +26,7 @@ dependencies = [
     "onnxruntime-gpu>=1.23.2",
     "openai-whisper>=20250625",
     "pyworld>=0.3.5",
+    "silero-stress>=1.3",
     "tensorrt-cu12>=10.11.0.33",
     "tensorrt-llm>=1.0.0",
     "torch>=2.7.1",

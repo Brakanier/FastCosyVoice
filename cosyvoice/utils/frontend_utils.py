@@ -152,3 +152,121 @@ def is_only_punctuation(text):
     # Regular expression: Match strings that consist only of punctuation marks or are empty.
     punctuation_pattern = r'^[\p{P}\p{S}]*$'
     return bool(regex.fullmatch(punctuation_pattern, text))
+
+
+# ============================================================================
+# Stress marks processing for Russian text
+# ============================================================================
+
+RUSSIAN_VOWELS = set('аеёиоуыэюяАЕЁИОУЫЭЮЯ')
+COMBINING_ACUTE = '\u0301'
+
+
+def convert_stress_marks(text: str) -> str:
+    """
+    Converts silero-stress format (+before vowel) to Unicode (vowel+U+0301).
+    
+    Example: "за+мок" -> "за́мок"
+    
+    Args:
+        text: Text with stress marks in silero-stress format
+    
+    Returns:
+        Text with stress marks in Unicode combining acute accent format
+    """
+    result = []
+    i = 0
+    while i < len(text):
+        if text[i] == '+' and i + 1 < len(text) and text[i + 1] in RUSSIAN_VOWELS:
+            # + before vowel -> vowel + combining acute accent
+            result.append(text[i + 1])
+            result.append(COMBINING_ACUTE)
+            i += 2
+        else:
+            result.append(text[i])
+            i += 1
+    return ''.join(result)
+
+
+def split_text_smart(text: str, max_chars: int = 400) -> list:
+    """
+    Splits text into optimal-sized chunks without breaking words or sentences.
+    
+    Optimal chunk size for silero-stress processing:
+    - 300 chars: maximum speed ~14,800 chars/sec
+    - 400 chars: good balance ~11,600 chars/sec
+    
+    Split priority:
+    1. At sentence boundary (. ! ? ; :)
+    2. At comma or other punctuation marks
+    3. At space between words
+    
+    Args:
+        text: Input text
+        max_chars: Maximum chunk size (default 400)
+    
+    Returns:
+        List of text chunks
+    """
+    if not text or len(text) <= max_chars:
+        return [text] if text else []
+    
+    chunks = []
+    current_pos = 0
+    text_len = len(text)
+    
+    # Priority delimiters
+    sentence_delims = '.!?;:。？！；：'
+    clause_delims = ',—–-，、'
+    
+    while current_pos < text_len:
+        # If remaining text is less than max_chars, take it all
+        if current_pos + max_chars >= text_len:
+            chunk = text[current_pos:].strip()
+            if chunk:
+                chunks.append(chunk)
+            break
+        
+        # Find best split point within max_chars
+        chunk_end = current_pos + max_chars
+        best_split = None
+        
+        # 1. Look for sentence end (priority) - iterate from end to start
+        for i in range(chunk_end, current_pos, -1):
+            if i > 0 and text[i - 1] in sentence_delims:
+                # Check that after delimiter there's space or end of text
+                if i >= text_len or text[i].isspace() or text[i] in '"»"\'':
+                    best_split = i
+                    break
+        
+        # 2. If not found, look for comma or dash (minimum half chunk)
+        if best_split is None:
+            min_pos = current_pos + max_chars // 2
+            for i in range(chunk_end, min_pos, -1):
+                if i > 0 and text[i - 1] in clause_delims:
+                    if i >= text_len or text[i].isspace():
+                        best_split = i
+                        break
+        
+        # 3. If not found, look for space
+        if best_split is None:
+            min_pos = current_pos + max_chars // 2
+            for i in range(chunk_end, min_pos, -1):
+                if text[i].isspace():
+                    best_split = i + 1
+                    break
+        
+        # 4. Fallback - hard split (should not happen in normal text)
+        if best_split is None:
+            best_split = chunk_end
+        
+        chunk = text[current_pos:best_split].strip()
+        if chunk:
+            chunks.append(chunk)
+        current_pos = best_split
+        
+        # Skip leading spaces of next chunk
+        while current_pos < text_len and text[current_pos].isspace():
+            current_pos += 1
+    
+    return chunks

@@ -37,6 +37,7 @@ from modelscope import snapshot_download
 
 from cosyvoice.utils.file_utils import logging
 from cosyvoice.utils.class_utils import get_model_type
+from cosyvoice.utils.frontend_utils import contains_cyrillic, convert_stress_marks, split_text_smart
 from cosyvoice.cli.model import CosyVoice3Model as OriginalCosyVoice3Model
 
 from .frontend import CosyVoiceFrontEnd
@@ -210,6 +211,52 @@ class FastCosyVoice3:
         
         del configs
         logging.info(f'FastCosyVoice3 initialized with fp16={fp16}, load_trt={load_trt}, load_trt_llm={load_trt_llm}')
+        
+        # Lazy-load silero-stress accentor (loaded on first use)
+        self._accentor = None
+    
+    @property
+    def accentor(self):
+        """Lazy-load silero-stress accentor for Russian stress marks."""
+        if self._accentor is None:
+            from silero_stress import load_accentor
+            self._accentor = load_accentor()
+            device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+            self._accentor.to(device=device)
+            logging.info(f'Loaded silero-stress accentor on {device}')
+        return self._accentor
+    
+    def _process_stress(self, text: str, auto_stress: bool = True) -> str:
+        """
+        Process stress marks in text.
+        
+        Args:
+            text: Input text
+            auto_stress: Apply automatic stress marks for Cyrillic text
+        
+        Returns:
+            Text with stress marks in Unicode U+0301 format
+        
+        Note:
+            Conversion of + to U+0301 is always performed (even with auto_stress=False),
+            so users can manually specify stress marks in silero-stress format.
+            
+            For long texts, silero-stress is called on chunks of ~400 characters
+            for optimal performance.
+        """
+        if auto_stress and contains_cyrillic(text):
+            # Split into chunks for silero-stress (optimal size ~400 characters)
+            chunks = split_text_smart(text, max_chars=400)
+            if len(chunks) == 1:
+                # Single chunk - process directly
+                text = self.accentor(chunks[0], stress_single_vowel=False)
+            else:
+                # Multiple chunks - process each and join back
+                processed_chunks = []
+                for chunk in chunks:
+                    processed_chunks.append(self.accentor(chunk, stress_single_vowel=False))
+                text = ' '.join(processed_chunks)
+        return convert_stress_marks(text)
     
     def _load_trt_llm(
         self,
@@ -844,7 +891,8 @@ class FastCosyVoice3:
         prompt_text: str,
         prompt_wav: str,
         zero_shot_spk_id: str = '',
-        text_frontend: bool = True
+        text_frontend: bool = True,
+        auto_stress: bool = False,
     ) -> Generator[bytes, None, None]:
         """
         Zero-shot streaming TTS inference with parallel pipeline.
@@ -860,10 +908,17 @@ class FastCosyVoice3:
             prompt_wav: Path to prompt audio file
             zero_shot_spk_id: Optional speaker ID (if already registered)
             text_frontend: Whether to apply text normalization
+            auto_stress: Whether to apply automatic stress marks for Russian text
+                         (uses silero-stress). Stress marks in + format are always
+                         converted to Unicode U+0301 regardless of this setting.
         
         Yields:
             Raw PCM bytes (int16, little-endian, mono, sample_rate from model)
         """
+        # Process stress marks (auto + manual conversion)
+        tts_text = self._process_stress(tts_text, auto_stress)
+        #prompt_text = self._process_stress(prompt_text, auto_stress)
+        
         # Normalize prompt text
         prompt_text = self.frontend.text_normalize(
             prompt_text, split=False, text_frontend=text_frontend
@@ -1035,7 +1090,8 @@ class FastCosyVoice3:
         prompt_wav: str,
         zero_shot_spk_id: str = '',
         text_frontend: bool = True,
-        speed: float = 1.0
+        speed: float = 1.0,
+        auto_stress: bool = False,
     ) -> Generator[bytes, None, None]:
         """
         Zero-shot non-streaming TTS inference.
@@ -1053,11 +1109,18 @@ class FastCosyVoice3:
             zero_shot_spk_id: Optional speaker ID (if already registered)
             text_frontend: Whether to apply text normalization
             speed: Speech speed multiplier (1.0 = normal)
+            auto_stress: Whether to apply automatic stress marks for Russian text
+                         (uses silero-stress). Stress marks in + format are always
+                         converted to Unicode U+0301 regardless of this setting.
         
         Yields:
             Raw PCM bytes (int16, little-endian, mono, sample_rate from model)
             (yields one chunk per text segment after normalization/splitting)
         """
+        # Process stress marks (auto + manual conversion)
+        tts_text = self._process_stress(tts_text, auto_stress)
+        prompt_text = self._process_stress(prompt_text, auto_stress)
+        
         # Normalize prompt text
         prompt_text = self.frontend.text_normalize(
             prompt_text, split=False, text_frontend=text_frontend

@@ -1072,6 +1072,7 @@ dependencies = [
     { name = "onnxruntime-gpu" },
     { name = "openai-whisper" },
     { name = "pyworld" },
+    { name = "silero-stress" },
     { name = "tensorrt-cu12" },
     { name = "tensorrt-llm" },
     { name = "torch" },
@@ -1102,6 +1103,7 @@ requires-dist = [
     { name = "onnxruntime-gpu", specifier = ">=1.23.2" },
     { name = "openai-whisper", specifier = ">=20250625" },
     { name = "pyworld", specifier = ">=0.3.5" },
+    { name = "silero-stress", specifier = ">=1.3" },
     { name = "tensorrt-cu12", specifier = ">=10.11.0.33" },
     { name = "tensorrt-llm", specifier = ">=1.0.0" },
     { name = "torch", specifier = ">=2.7.1" },
@@ -4570,6 +4572,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/bb/71/b6365e6325b3290e14957b2c3a804a529968c77a049b2ed40c095f749707/setuptools-79.0.1.tar.gz", hash = "sha256:128ce7b8f33c3079fd1b067ecbb4051a66e8526e7b65f6cec075dfc650ddfa88", size = 1367909, upload-time = "2025-04-23T22:20:59.241Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0d/6d/b4752b044bf94cb802d88a888dc7d288baaf77d7910b7dedda74b5ceea0c/setuptools-79.0.1-py3-none-any.whl", hash = "sha256:e147c0549f27767ba362f9da434eab9c5dc0045d5304feb602a0af001089fc51", size = 1256281, upload-time = "2025-04-23T22:20:56.768Z" },
+]
+
+[[package]]
+name = "silero-stress"
+version = "1.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a9/81/4eda6d032f64178c46b593c96ad5727955f7903894724c336ac1cff7901e/silero_stress-1.3.tar.gz", hash = "sha256:269153d97303002580f11bb2221be28a36a6d392ac57cdb2bf8c5ca032dec4c7", size = 38586417, upload-time = "2025-12-17T07:05:54.37Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/92/49/c8787dd50ee87ea03a3e49e0e474d7c8624d3f008efdb888c54aecbcb410/silero_stress-1.3-py3-none-any.whl", hash = "sha256:0242c5e467e68dfd1d865ca1aee15b13621d026bea4a27caca22f46314530b10", size = 38593442, upload-time = "2025-12-17T07:05:51.499Z" },
 ]
 
 [[package]]

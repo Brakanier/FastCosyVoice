@@ -11,6 +11,7 @@
 - Examples with faster inference
 - Translated webui.py
 - Match-TTS installed from pypi, removed from git submodule
+- Stress support
 
 ### Examples:
 
@@ -27,7 +28,6 @@ run_instruct.py  # inference exaples with instructions
 
 benchmark_llm.py  # benchmark llm module in different configurations
 ```
-
 
 
 Any questions you can discuss with author in [Telegram](https://t.me/xVibeNot)
@@ -47,6 +47,14 @@ Tested on **RTX 3090**
 | stream + fp16 + TRT Flow + torch.compile | 0.706 sec | 0.487 |
 | stream + fp16 + TRT Flow + TRT LLM | 0.470 sec | 0.245 |
 | offline + fp16 + TRT Flow + TRT LLM | - | 0.1 |
+
+### Stress support
+
+Use `+` before stressed letter. `+` will be auto converted to `\u0301`.
+
+Added **auto_stress** (default False) parameter with silero-stress for Russian language. But it works strange when you have stress mark in every word.
+
+For better performance, only mark stress in homographs and mispronounced words.
 
 
 ### Install
