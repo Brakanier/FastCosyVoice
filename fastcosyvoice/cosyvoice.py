@@ -102,7 +102,7 @@ class FastCosyVoice3:
         
         # Download model if not exists
         if not os.path.exists(model_dir):
-            model_dir = snapshot_download(model_dir)
+            model_dir = snapshot_download(model_id='FunAudioLLM/Fun-CosyVoice3-0.5B-2512', local_dir=model_dir)
             self.model_dir = model_dir
         
         # Load config

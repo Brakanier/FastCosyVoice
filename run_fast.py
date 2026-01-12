@@ -280,14 +280,9 @@ def main():
     print("FastCosyVoice3 TTS - Parallel Pipeline Streaming Inference")
     print("=" * 70)
     
-    # Check for model / reference
-    try:
-        if not os.path.exists(MODEL_DIR):
-            raise FileNotFoundError(f"Model not found: {MODEL_DIR}")
-        if not os.path.exists(REFERENCE_AUDIO):
-            raise FileNotFoundError(f"Reference audio not found: {REFERENCE_AUDIO}")
-    except FileNotFoundError as e:
-        logger.error(str(e), exc_info=True)
+    # Check for reference audio
+    if not os.path.exists(REFERENCE_AUDIO):
+        logger.error(f"Reference audio not found: {REFERENCE_AUDIO}", exc_info=True)
         return
     
     # Create output directory

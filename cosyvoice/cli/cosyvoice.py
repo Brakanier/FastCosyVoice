@@ -192,7 +192,7 @@ class CosyVoice3(CosyVoice2):
         self.model_dir = model_dir
         self.fp16 = fp16
         if not os.path.exists(model_dir):
-            model_dir = snapshot_download(model_dir)
+            model_dir = snapshot_download(model_id='FunAudioLLM/Fun-CosyVoice3-0.5B-2512', local_dir=model_dir)
         hyper_yaml_path = '{}/cosyvoice3.yaml'.format(model_dir)
         if not os.path.exists(hyper_yaml_path):
             raise ValueError('{} not found!'.format(hyper_yaml_path))

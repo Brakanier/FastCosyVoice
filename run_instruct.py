@@ -28,12 +28,8 @@ def test_instruct2_examples():
     print("=" * 80)
     print("Initializing CosyVoice3 model...")
     print("=" * 80)
-    
-    # Check if model exists
+
     model_dir = 'pretrained_models/Fun-CosyVoice3-0.5B'
-    if not os.path.exists(model_dir):
-        logging.error(f"Model not found: {model_dir}", exc_info=True)
-        return
     
     # Check if reference audio exists
     prompt_wav = './refs/audio.wav'

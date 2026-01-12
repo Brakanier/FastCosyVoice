@@ -141,12 +141,7 @@ def main():
     print("=" * 70)
     print("CosyVoice3 TTS - Streaming Inference (zero_shot)")
     print("=" * 70)
-    
-    # Check if model exists
-    if not os.path.exists(MODEL_DIR):
-        logger.error(f"Model not found: {MODEL_DIR}", exc_info=True)
-        return
-    
+        
     # Check if reference audio exists
     if not os.path.exists(REFERENCE_AUDIO):
         logger.error(f"Reference audio not found: {REFERENCE_AUDIO}", exc_info=True)
