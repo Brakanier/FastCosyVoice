@@ -44,6 +44,20 @@ from .frontend import CosyVoiceFrontEnd
 from .model import FastCosyVoice3Model
 
 
+def _get_gpu_sm_version() -> str:
+    """
+    Get GPU SM (Streaming Multiprocessor) version string.
+    
+    Returns:
+        SM version string like 'sm86' (Ampere), 'sm89' (Ada), 'sm120' (Blackwell)
+        Returns 'cpu' if CUDA is not available.
+    """
+    if not torch.cuda.is_available():
+        return 'cpu'
+    major, minor = torch.cuda.get_device_capability()
+    return f'sm{major}{minor}'
+
+
 class FastCosyVoice3:
     """
     FastCosyVoice3 - Parallel Pipeline TTS Interface.
@@ -165,8 +179,9 @@ class FastCosyVoice3:
         # NOTE: If artifacts are missing, _load_trt_llm may need PyTorch LLM weights to build hf_merged.
         skip_pytorch_llm = False
         if load_trt_llm and torch.cuda.is_available():
+            sm_version = _get_gpu_sm_version()
             hf_merged_dir = os.path.join(model_dir, 'hf_merged')
-            trt_engines_dir = os.path.join(model_dir, f'trt_llm_engines_{trt_llm_dtype}_merged')
+            trt_engines_dir = os.path.join(model_dir, f'trt_llm_engines_{trt_llm_dtype}_{sm_version}_merged')
             metadata_path = os.path.join(hf_merged_dir, 'cosyvoice3_metadata.json')
             if os.path.exists(metadata_path) and os.path.isdir(trt_engines_dir):
                 engine_files = [f for f in os.listdir(trt_engines_dir) if f.endswith('.engine')]
@@ -186,9 +201,10 @@ class FastCosyVoice3:
         if load_trt:
             if fp16:
                 logging.warning('DiT TensorRT fp16 engine may have performance issues, use with caution!')
+            sm_version = _get_gpu_sm_version()
             trt_model_path = os.path.join(
                 model_dir, 
-                f'flow.decoder.estimator.{"fp16" if fp16 else "fp32"}.mygpu.plan'
+                f'flow.decoder.estimator.{"fp16" if fp16 else "fp32"}.{sm_version}.plan'
             )
             onnx_model_path = os.path.join(model_dir, 'flow.decoder.estimator.fp32.onnx')
             self.model.load_trt(trt_model_path, onnx_model_path, trt_concurrent, fp16)
@@ -290,10 +306,11 @@ class FastCosyVoice3:
             )
             return
         
-        # Paths for merged model
+        # Paths for merged model (hf_merged and weights are GPU-independent, engines are GPU-specific)
+        sm_version = _get_gpu_sm_version()
         hf_merged_dir = os.path.join(self.model_dir, 'hf_merged')
         trt_weights_dir = os.path.join(self.model_dir, f'trt_llm_weights_{dtype}_merged')
-        trt_engines_dir = os.path.join(self.model_dir, f'trt_llm_engines_{dtype}_merged')
+        trt_engines_dir = os.path.join(self.model_dir, f'trt_llm_engines_{dtype}_{sm_version}_merged')
         metadata_path = os.path.join(hf_merged_dir, 'cosyvoice3_metadata.json')
         
         # Check if merged model exists
