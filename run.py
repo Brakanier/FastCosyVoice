@@ -114,15 +114,20 @@ def warmup_model(
         spk_id: Speaker ID (should already be added via add_zero_shot_spk)
     """
     # Texts of different lengths to cover different input sizes
+    # Include both English and Russian to compile graphs for different tokenizations
     warmup_texts = [
-        # Short text (~50-100 LLM tokens)
+        # Short texts
         "Hello! How are you?",
-        # Medium text (~100-200 LLM tokens)  
+        "Привет! Как дела?",
+        # Medium texts
         "This is a test synthesis of medium-length text for model warmup.",
-        # Long text (~200-400 LLM tokens)
+        "Это тестовый синтез текста средней длины для прогрева модели.",
+        # Long texts
         "This is a longer text for warmup. " * 3,
-        # Very long text (~400+ LLM tokens)
+        "Это более длинный текст для прогрева модели и компиляции графов. " * 3,
+        # Very long texts
         "Warming up the model on a long text for compilation. " * 5,
+        "Прогреваем модель на длинном тексте для компиляции всех путей выполнения. " * 5,
     ]
     
     warmup_start = time.time()
