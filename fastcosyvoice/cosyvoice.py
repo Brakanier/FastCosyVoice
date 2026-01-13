@@ -782,21 +782,11 @@ class FastCosyVoice3:
                     total_raw_tokens += len(new_tokens)
                     
                     # Extract and yield speech tokens immediately
-                    eos_detected = False
                     for tid in new_tokens:
-                        # Check for EOS token and stop generation (workaround for Blackwell)
-                        if tid == self.eos1_token_id:
-                            logging.debug(f'EOS token detected (id={tid}), stopping generation')
-                            eos_detected = True
-                            break
-                        
                         if self.speech_token_offset <= tid < self.speech_token_offset + self.speech_token_size:
                             speech_id = tid - self.speech_token_offset
                             total_speech_tokens += 1
                             yield speech_id
-                    
-                    if eos_detected:
-                        break
         finally:
             # Cleanup batch input tensors
             del batch_input_ids

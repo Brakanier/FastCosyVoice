@@ -86,7 +86,7 @@ INSTRUCTION = "You are a helpful assistant."
 # TensorRT settings
 USE_TRT_FLOW = True       # TensorRT for Flow decoder (~2.5x speedup)
 USE_TRT_LLM = True        # TensorRT-LLM for LLM (~3x speedup)
-TRT_LLM_DTYPE = 'bfloat16'  # bfloat16/float16/float32
+TRT_LLM_DTYPE = 'float16'  # bfloat16/float16/float32
 # Max tokens in KV-cache. 8192 tokens ≈ 100MB for Qwen2-0.5B.
 # Minimum needed: max_input_len + max_output_len = 512 + 2048 = 2560 tokens.
 TRT_LLM_KV_CACHE_TOKENS = 8192
