@@ -35,18 +35,25 @@ Any questions you can discuss with author in [Telegram](https://t.me/xVibeNot)
 
 ### Speed benchmarks
 
-Tested on **RTX 3090**
-
 **TTFB** - latency to first chunk of speech
 
 **RTF** - inference time / output speech duration
 
-| Configuration | TTFB | RTF |
-| :--- | :---: | :---: |
-| stream + basic | 2.691 sec | 1.184 |
-| stream + fp16 + TRT Flow + torch.compile | 0.706 sec | 0.487 |
-| stream + fp16 + TRT Flow + TRT LLM | 0.470 sec | 0.245 |
-| offline + fp16 + TRT Flow + TRT LLM | - | 0.1 |
+| RTX 3090 + Ryzen 7 3700x + WSL | Configuration | TTFB | RTF |
+| :--- | :--- | :---: | :---: |
+| run_basic.py | stream + basic | 1.767 sec | 0.930 |
+| run.py | stream + fp16 + TRT Flow + torch.compile | 0.797 sec | 0.442 |
+| run_fast.py | stream + fp16 + TRT Flow + TRT LLM | 0.470 sec | 0.245 |
+| run_offline.py | offline + fp16 + TRT Flow + TRT LLM | - | 0.1 |
+
+
+
+| RTX 5060ti + Ryzen 9 7900 + Linux | Configuration | TTFB | RTF |
+| :--- | :--- | :---: | :---: |
+| run_basic.py | stream + basic | 0.719 sec | 0.548 |
+| run.py | stream + fp16 + TRT Flow + torch.compile | 0.358 sec | 0.215 |
+| run_fast.py | stream + fp16 + TRT Flow + TRT LLM | 0.376 sec | 0.203 |
+| run_offline.py | offline + fp16 + TRT Flow + TRT LLM | - | 0.127 |
 
 ### Stress support
 
