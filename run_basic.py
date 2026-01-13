@@ -89,30 +89,42 @@ def synthesize_streaming(
         prompt_text: Transcription of reference audio in format "{instruction}<|endofprompt|>{transcription}"
     
     Returns:
-        dict with keys: ttfb, total_time, audio_duration, rtf, chunk_count
+        dict with keys: ttfb, total_time, audio_duration, rtf, chunk_count, inference_time
     """
-    start_time = time.time()
-    first_chunk_time = None
-    audio_chunks = []
-    chunk_count = 0
-    
-    for model_output in cosyvoice.inference_zero_shot(
+    # Create generator first (no computation yet)
+    generator = cosyvoice.inference_zero_shot(
         tts_text=text,
         prompt_text=prompt_text,
         prompt_wav=REFERENCE_AUDIO,
         zero_shot_spk_id=spk_id,
         stream=True,
-    ):
+    )
+    
+    # Sync GPU before starting timer to ensure clean measurement
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    
+    start_time = time.time()
+    first_chunk_time = None
+    audio_chunks = []
+    chunk_count = 0
+    
+    for model_output in generator:
         chunk_count += 1
         
+        # Get speech tensor
+        speech = model_output['tts_speech']
+        
+        # For TTFB: sync GPU and measure time AFTER receiving first chunk data
         if first_chunk_time is None:
+            # Force GPU sync to ensure the chunk is actually computed
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             first_chunk_time = time.time() - start_time
         
-        speech = model_output['tts_speech']
         audio_chunks.append(speech)
     
+    # Sync GPU before final time measurement
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     
@@ -126,6 +138,7 @@ def synthesize_streaming(
     else:
         audio_duration = 0.0
     
+    # RTF based on total time (includes frontend preprocessing)
     rtf = total_time / audio_duration if audio_duration > 0 else float('inf')
     
     return {
@@ -186,6 +199,23 @@ def main():
     cosyvoice.add_zero_shot_spk(prompt_text, REFERENCE_AUDIO, spk_id)
     embed_time = time.time() - embed_start
     print(f"✅ Embeddings prepared in {embed_time:.3f} sec")
+    
+    # Warmup run to initialize CUDA kernels and allocate memory
+    print("\n🔥 Warmup run...")
+    warmup_text = "Тестовый прогрев модели."
+    warmup_start = time.time()
+    for _ in cosyvoice.inference_zero_shot(
+        tts_text=warmup_text,
+        prompt_text=prompt_text,
+        prompt_wav=REFERENCE_AUDIO,
+        zero_shot_spk_id=spk_id,
+        stream=True,
+    ):
+        pass  # Just iterate through to trigger computation
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    warmup_time = time.time() - warmup_start
+    print(f"✅ Warmup completed in {warmup_time:.3f} sec")
     
     # Summary for all texts
     all_metrics = []
