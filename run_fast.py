@@ -27,34 +27,6 @@ import torch
 from fastcosyvoice import FastCosyVoice3
 
 
-def get_gpu_memory_stats() -> dict:
-    """
-    Returns GPU memory usage statistics.
-    
-    Returns:
-        dict with keys: allocated_gb, reserved_gb, max_allocated_gb
-    """
-    if not torch.cuda.is_available():
-        return {'allocated_gb': 0.0, 'reserved_gb': 0.0, 'max_allocated_gb': 0.0}
-    
-    allocated = torch.cuda.memory_allocated() / (1024 ** 3)
-    reserved = torch.cuda.memory_reserved() / (1024 ** 3)
-    max_allocated = torch.cuda.max_memory_allocated() / (1024 ** 3)
-
-    return {
-        'allocated_gb': allocated,
-        'reserved_gb': reserved,
-        'max_allocated_gb': max_allocated,
-    }
-
-
-def print_gpu_memory(label: str) -> None:
-    """Prints current GPU memory state with a label."""
-    stats = get_gpu_memory_stats()
-    print(f"\n📊 GPU Memory [{label}]:")
-    print(f"   Allocated: {stats['allocated_gb']:.2f} GB")
-    print(f"   Reserved: {stats['reserved_gb']:.2f} GB")
-    print(f"   Peak Allocated: {stats['max_allocated_gb']:.2f} GB")
 # Optimization for torch.compile (if used)
 torch.set_float32_matmul_precision('high')
 
@@ -318,8 +290,6 @@ def main():
     elif USE_TRT_LLM:
         print("⚠️ TensorRT-LLM not loaded, using PyTorch")
     
-    print_gpu_memory("after model loading")
-    
     # dtype diagnostics
     llm_dtype = next(cosyvoice.model.llm.parameters()).dtype
     flow_dtype = next(cosyvoice.model.flow.parameters()).dtype
@@ -379,12 +349,6 @@ def main():
         warmup_model(cosyvoice, prompt_text, spk_id)
         print("✅ Model warmed up and ready")
     
-    print_gpu_memory("after warmup")
-    
-    # Reset peak memory counter to measure only generation
-    if torch.cuda.is_available():
-        torch.cuda.reset_peak_memory_stats()
-    
     # Summary for all texts
     all_metrics = []
     
@@ -439,8 +403,6 @@ def main():
         except Exception as e:
             logger.error(f"Error clearing memory after text #{idx}: {e}", exc_info=True)
     
-    print_gpu_memory("after generation")
-    
     # Final summary
     if all_metrics:
         print("\n" + "=" * 70)
@@ -471,8 +433,6 @@ def main():
     print("✅ GENERATION COMPLETED!")
     print("=" * 70)
     print(f"\n📁 Results: {OUTPUT_DIR}/")
-    
-    print_gpu_memory("at the end")
 
 
 if __name__ == '__main__':
