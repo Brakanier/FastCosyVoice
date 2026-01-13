@@ -21,36 +21,6 @@ from pathlib import Path
 sys.path.append('third_party/Matcha-TTS')
 
 
-def get_gpu_memory_stats() -> dict:
-    """
-    Returns GPU memory usage statistics.
-    
-    Returns:
-        dict with keys: allocated_gb, reserved_gb, max_allocated_gb
-    """
-    import torch
-    if not torch.cuda.is_available():
-        return {'allocated_gb': 0.0, 'reserved_gb': 0.0, 'max_allocated_gb': 0.0}
-    
-    allocated = torch.cuda.memory_allocated() / (1024 ** 3)
-    reserved = torch.cuda.memory_reserved() / (1024 ** 3)
-    max_allocated = torch.cuda.max_memory_allocated() / (1024 ** 3)
-
-    return {
-        'allocated_gb': allocated,
-        'reserved_gb': reserved,
-        'max_allocated_gb': max_allocated,
-    }
-
-
-def print_gpu_memory(label: str) -> None:
-    """Prints current GPU memory state with a label."""
-    stats = get_gpu_memory_stats()
-    print(f"\n📊 GPU Memory [{label}]:")
-    print(f"   Allocated: {stats['allocated_gb']:.2f} GB")
-    print(f"   Reserved: {stats['reserved_gb']:.2f} GB")
-    print(f"   Peak allocated: {stats['max_allocated_gb']:.2f} GB")
-
 import torch
 import torchaudio
 from cosyvoice.cli.cosyvoice import CosyVoice3
@@ -144,15 +114,20 @@ def warmup_model(
         spk_id: Speaker ID (should already be added via add_zero_shot_spk)
     """
     # Texts of different lengths to cover different input sizes
+    # Include both English and Russian to compile graphs for different tokenizations
     warmup_texts = [
-        # Short text (~50-100 LLM tokens)
+        # Short texts
         "Hello! How are you?",
-        # Medium text (~100-200 LLM tokens)  
+        "Привет! Как дела?",
+        # Medium texts
         "This is a test synthesis of medium-length text for model warmup.",
-        # Long text (~200-400 LLM tokens)
+        "Это тестовый синтез текста средней длины для прогрева модели.",
+        # Long texts
         "This is a longer text for warmup. " * 3,
-        # Very long text (~400+ LLM tokens)
+        "Это более длинный текст для прогрева модели и компиляции графов. " * 3,
+        # Very long texts
         "Warming up the model on a long text for compilation. " * 5,
+        "Прогреваем модель на длинном тексте для компиляции всех путей выполнения. " * 5,
     ]
     
     warmup_start = time.time()
@@ -267,7 +242,7 @@ def main():
         return
     
     # Create output directory
-    Path(OUTPUT_DIR).mkdir(exist_ok=True)
+    Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
     
     # Load prompt_text from txt file next to audio
     prompt_text = load_prompt_text(REFERENCE_AUDIO, INSTRUCTION)
@@ -288,8 +263,6 @@ def main():
     
     load_time = time.time() - load_start
     print(f"✅ Model loaded in {load_time:.2f} sec")
-    
-    print_gpu_memory("after model loading")
     
     # dtype diagnostics
     llm_dtype = next(cosyvoice.model.llm.parameters()).dtype
@@ -319,12 +292,6 @@ def main():
     print("\n🔥 Warming up model (compiling graphs for different text lengths)...")
     warmup_model(cosyvoice, prompt_text, spk_id)
     print("✅ Model warmed up and ready")
-    
-    print_gpu_memory("after warmup")
-    
-    # Reset peak memory counter to measure only generation
-    if torch.cuda.is_available():
-        torch.cuda.reset_peak_memory_stats()
     
     # Summary for all texts
     all_metrics = []
@@ -368,8 +335,6 @@ def main():
             logger.error(f"Error synthesizing text #{idx}: {e}", exc_info=True)
             continue
     
-    print_gpu_memory("after generation")
-    
     # Final summary
     if all_metrics:
         print("\n" + "=" * 70)
@@ -390,8 +355,6 @@ def main():
     print("✅ GENERATION COMPLETED!")
     print("=" * 70)
     print(f"\n📁 Results: {OUTPUT_DIR}/")
-    
-    print_gpu_memory("at the end")
 
 
 if __name__ == '__main__':
