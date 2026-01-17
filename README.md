@@ -281,6 +281,77 @@ docker compose up -d
 ```
 For more details, you could check [here](https://github.com/FunAudioLLM/CosyVoice/tree/main/runtime/triton_trtllm)
 
+#### RTX 20 Series (Turing, SM 7.5) Support
+
+RTX 20 series GPUs (RTX 2060, 2070, 2080, etc.) have limited TensorRT-LLM support:
+
+**Limitations:**
+- BF16 is **not supported** (use FP16 instead)
+- Context FMHA is **not supported** (automatically disabled)
+- Pre-built pip packages may not include SM 7.5 kernels
+
+**Automatic handling:**
+FastCosyVoice automatically:
+- Switches from `bfloat16` to `float16` on SM < 80
+- Disables context FMHA in trtllm-build for SM < 80
+- Shows warnings about architecture limitations
+
+**If you get "no kernel image is available" error:**
+
+This means TensorRT-LLM was not built with SM 7.5 support. You need to build it from source:
+
+``` bash
+# Requirements: CUDA 12.x, Python 3.10+, ~50GB disk space
+
+# First, sync your project dependencies
+uv sync
+
+# Activate the virtual environment
+source .venv/bin/activate
+
+# Clone and build TensorRT-LLM
+git clone --recursive https://github.com/NVIDIA/TensorRT-LLM.git
+cd TensorRT-LLM
+
+# Build for SM 7.5 only (faster)
+python ./scripts/build_wheel.py --cuda_architectures "75-real" --clean
+
+# Or build for multiple architectures
+python ./scripts/build_wheel.py --cuda_architectures "75-real;80-real;86-real" --clean
+
+# Install the built wheel
+pip install ./build/tensorrt_llm*.whl --force-reinstall
+
+# Go back to project directory
+cd ..
+```
+
+**Workaround without rebuilding:**
+
+Use TensorRT for Flow decoder only (still provides ~2.5x speedup):
+
+``` python
+cosyvoice = FastCosyVoice3(
+    model_dir=MODEL_DIR,
+    fp16=True,
+    load_trt=True,        # TensorRT for Flow works on all GPUs
+    load_trt_llm=False,   # Disable TRT-LLM
+)
+```
+
+**Diagnostic commands:**
+
+``` bash
+# Activate venv first
+source .venv/bin/activate
+
+# Check GPU SM version
+python -c "import torch; print(f'SM: {torch.cuda.get_device_capability()}')"
+
+# Check if TRT-LLM has SM 7.5 kernels
+cuobjdump -lelf $(python -c "import tensorrt_llm; print(tensorrt_llm.__path__[0])")/libs/libtensorrt_llm.so 2>/dev/null | grep sm_75
+```
+
 ## Discussion & Communication
 
 You can directly discuss on [Github Issues](https://github.com/Brakanier/FastCosyVoice/issues) or [Original Github Issues](https://github.com/FunAudioLLM/CosyVoice/issues).

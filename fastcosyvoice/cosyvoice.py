@@ -58,6 +58,50 @@ def _get_gpu_sm_version() -> str:
     return f'sm{major}{minor}'
 
 
+def _get_trt_llm_capabilities(sm_version: str) -> dict:
+    """
+    Get TensorRT-LLM capabilities for a given GPU architecture.
+    
+    Args:
+        sm_version: SM version string like 'sm75', 'sm86', 'sm89'
+    
+    Returns:
+        Dictionary with capability flags:
+        - supports_bf16: Whether BF16 is supported (SM >= 80)
+        - supports_context_fmha: Whether context FMHA is supported (SM >= 80)
+        - supports_fp8: Whether FP8 is supported (SM >= 89)
+        - recommended_dtype: Recommended dtype for this architecture
+        - requires_source_build: Whether TRT-LLM needs to be built from source
+    
+    Note:
+        SM 7.5 (Turing, RTX 20 series) requires TensorRT-LLM to be built from source
+        with --cuda_architectures "75-real" flag. Pre-built pip packages typically
+        don't include SM 7.5 kernels.
+    """
+    if sm_version == 'cpu':
+        return {
+            'supports_bf16': False,
+            'supports_context_fmha': False,
+            'supports_fp8': False,
+            'recommended_dtype': 'float32',
+            'requires_source_build': False,
+        }
+    
+    # Extract SM number (e.g., 'sm75' -> 75)
+    try:
+        sm_num = int(sm_version.replace('sm', ''))
+    except ValueError:
+        sm_num = 0
+    
+    return {
+        'supports_bf16': sm_num >= 80,
+        'supports_context_fmha': sm_num >= 80,
+        'supports_fp8': sm_num >= 89,
+        'recommended_dtype': 'float16' if sm_num < 80 else 'bfloat16',
+        'requires_source_build': sm_num < 80 and sm_num > 0,
+    }
+
+
 class FastCosyVoice3:
     """
     FastCosyVoice3 - Parallel Pipeline TTS Interface.
@@ -305,6 +349,27 @@ class FastCosyVoice3:
                 exc_info=True
             )
             return
+        
+        # Check GPU capabilities and adjust dtype if needed
+        sm_version = _get_gpu_sm_version()
+        capabilities = _get_trt_llm_capabilities(sm_version)
+        
+        # Warn about SM 7.5 (Turing) limitations
+        if capabilities['requires_source_build']:
+            logging.warning(
+                f'GPU architecture {sm_version} (Turing/RTX 20 series) requires TensorRT-LLM '
+                'built from source with --cuda_architectures "75-real". '
+                'Pre-built pip packages may not include SM 7.5 kernels. '
+                'See README for build instructions.'
+            )
+        
+        # Auto-correct dtype for architectures that don't support BF16
+        if dtype == 'bfloat16' and not capabilities['supports_bf16']:
+            logging.warning(
+                f'BF16 is not supported on {sm_version}. '
+                f'Switching to float16 (recommended: {capabilities["recommended_dtype"]})'
+            )
+            dtype = 'float16'
         
         # Paths for merged model (hf_merged and weights are GPU-independent, engines are GPU-specific)
         sm_version = _get_gpu_sm_version()
@@ -659,6 +724,16 @@ class FastCosyVoice3:
                 '--max_num_tokens', '2560',
                 '--gemm_plugin', dtype,
             ]
+            
+            # For SM < 80 (Turing, RTX 20 series), disable context FMHA
+            # as it's not supported on these architectures
+            sm_version = _get_gpu_sm_version()
+            capabilities = _get_trt_llm_capabilities(sm_version)
+            if not capabilities['supports_context_fmha']:
+                logging.info(
+                    f'Disabling context FMHA for {sm_version} (not supported on this architecture)'
+                )
+                build_cmd.extend(['--context_fmha', 'disable'])
             
             result = subprocess.run(build_cmd, capture_output=True, text=True, timeout=1800)
             
