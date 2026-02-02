@@ -19,7 +19,7 @@ dependencies = [
     "lightning>=2.6.0",
     "matcha-tts>=0.0.7.2",
     "modelscope>=1.33.0",
-    "numpy<2.0",
+    "numpy>1.24,<2.0",
     "omegaconf>=2.3.0",
     "onnx==1.19.1",
     "onnxruntime==1.21.1",
