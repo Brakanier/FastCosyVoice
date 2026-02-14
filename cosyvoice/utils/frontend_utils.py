@@ -122,9 +122,16 @@ def split_paragraph(text: str, tokenize, lang="zh", token_max_n=80, token_min_n=
     final_utts = []
     cur_utt = ""
     for utt in utts:
-        if calc_utt_length(cur_utt + utt) > token_max_n and calc_utt_length(cur_utt) > token_min_n:
-            final_utts.append(cur_utt)
-            cur_utt = ""
+        cur_combined_len = calc_utt_length(cur_utt + utt)
+        cur_len = calc_utt_length(cur_utt) if cur_utt else 0
+
+        if cur_combined_len > token_max_n:
+            if cur_len > 0:
+                # Flush current buffer (even if short) to avoid oversized chunks.
+                # Original logic only flushed when cur_len > token_min_n, which
+                # caused short sentences to merge with long ones, exceeding the limit.
+                final_utts.append(cur_utt)
+                cur_utt = ""
         cur_utt = cur_utt + utt
     if len(cur_utt) > 0:
         if should_merge(cur_utt) and len(final_utts) != 0:
@@ -132,7 +139,61 @@ def split_paragraph(text: str, tokenize, lang="zh", token_max_n=80, token_min_n=
         else:
             final_utts.append(cur_utt)
 
-    return final_utts
+    # Post-split: break any chunk that still exceeds token_max_n.
+    # This handles cases where a single sentence (no internal sentence-ending
+    # punctuation) is longer than token_max_n. We re-split by commas and dashes.
+    if lang == "zh":
+        secondary_delims = set('，、,')
+    else:
+        secondary_delims = set(',，–—')
+
+    result_utts = []
+    for utt in final_utts:
+        if calc_utt_length(utt) <= token_max_n:
+            result_utts.append(utt)
+            continue
+
+        # Try splitting by secondary delimiters (commas, dashes)
+        sub_parts = _split_by_delimiters(utt, secondary_delims)
+
+        # Re-merge sub-parts respecting token_max_n
+        cur = ""
+        for part in sub_parts:
+            if cur and calc_utt_length(cur + part) > token_max_n:
+                if cur.strip():
+                    result_utts.append(cur.strip())
+                cur = ""
+            cur = cur + part
+        if cur.strip():
+            # Merge short trailing fragment with previous chunk if possible
+            tail = cur.strip()
+            if (should_merge(tail) and result_utts
+                    and calc_utt_length(result_utts[-1] + ' ' + tail) <= token_max_n):
+                result_utts[-1] = result_utts[-1] + ' ' + tail
+            else:
+                result_utts.append(tail)
+
+    return result_utts
+
+
+def _split_by_delimiters(text: str, delimiters: set) -> list:
+    """
+    Split text by delimiter characters, keeping delimiters attached to the
+    preceding segment.
+
+    Example with delimiters={','}:
+        "hello, world, foo" -> ["hello,", " world,", " foo"]
+    """
+    parts = []
+    st = 0
+    for i, c in enumerate(text):
+        if c in delimiters:
+            if i >= st:
+                parts.append(text[st:i + 1])
+                st = i + 1
+    if st < len(text):
+        parts.append(text[st:])
+    return parts if parts else [text]
 
 
 # remove blank between chinese character

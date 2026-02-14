@@ -397,7 +397,7 @@ class FastCosyVoice3:
             max_output_len=2048,
             enable_context_fmha_fp32_acc=False,
             max_batch_size=max_batch_size,
-            max_input_len=512,
+            max_input_len=1024,
             max_tokens_in_paged_kv_cache=kv_cache_tokens,
             cuda_graph_mode=False,
             gather_generation_logits=False,
@@ -655,8 +655,8 @@ class FastCosyVoice3:
                 '--checkpoint_dir', trt_weights_dir,
                 '--output_dir', trt_engines_dir,
                 '--max_batch_size', str(max_batch_size),
-                '--max_input_len', '512',
-                '--max_num_tokens', '2560',
+                '--max_input_len', '1024',
+                '--max_num_tokens', '3072',
                 '--gemm_plugin', dtype,
             ]
             
@@ -740,7 +740,25 @@ class FastCosyVoice3:
         max_speech_tokens = int(estimated_duration_sec * 25 * 1.5)  # 1.5x margin
         max_new_tokens = min(max_speech_tokens + 100, 2048)  # Cap at 2048
         
-        logging.debug(f'TRT-LLM: text_len={len(text)}, estimated_duration={estimated_duration_sec:.1f}s, max_new_tokens={max_new_tokens}')
+        # Estimate min tokens to prevent premature EOS.
+        # Use TWO estimates and take the max for robustness:
+        # 1. Token-based: text_tokens * 2 (matches PyTorch min_token_text_ratio=2)
+        # 2. Character-based: chars * 1.8 (≈25 speech_tok/s ÷ ~14 chars/s)
+        # The character-based estimate is more reliable for Russian text where
+        # tokenizer tokens are few but actual speech duration is long.
+        # Empirical data: median ratio = 1.68 tok/char, min observed = 1.11.
+        # Using 1.7-1.8 ensures the model generates enough tokens for complete speech
+        # while still allowing natural EOS for texts spoken faster than average.
+        text_token_ids = self.trt_llm_tokenizer.encode(text)
+        min_by_tokens = len(text_token_ids) * 2
+        min_by_chars = int(len(text) * 1.7)
+        min_new_tokens = max(min_by_tokens, min_by_chars)
+        
+        logging.debug(
+            f'TRT-LLM: text_len={len(text)}, text_tokens={len(text_token_ids)}, '
+            f'min_new_tokens={min_new_tokens} (tok={min_by_tokens}, char={min_by_chars}), '
+            f'max_new_tokens={max_new_tokens}'
+        )
         
         # Generate with STREAMING
         llm_gen_start = time.time()
@@ -760,6 +778,7 @@ class FastCosyVoice3:
                     top_k=sampling,
                     top_p=0.95,
                     repetition_penalty=1.1,
+                    min_tokens=min_new_tokens,
                     num_return_sequences=1,
                     streaming=True,  # TRUE STREAMING!
                     output_sequence_lengths=True,
@@ -1055,7 +1074,25 @@ class FastCosyVoice3:
         max_speech_tokens = int(estimated_duration_sec * 25 * 1.5)
         max_new_tokens = min(max_speech_tokens + 100, 2048)
         
-        logging.debug(f'TRT-LLM: text_len={len(text)}, estimated_duration={estimated_duration_sec:.1f}s, max_new_tokens={max_new_tokens}')
+        # Estimate min tokens to prevent premature EOS.
+        # Use TWO estimates and take the max for robustness:
+        # 1. Token-based: text_tokens * 2 (matches PyTorch min_token_text_ratio=2)
+        # 2. Character-based: chars * 1.8 (≈25 speech_tok/s ÷ ~14 chars/s)
+        # The character-based estimate is more reliable for Russian text where
+        # tokenizer tokens are few but actual speech duration is long.
+        # Empirical data: median ratio = 1.68 tok/char, min observed = 1.11.
+        # Using 1.7-1.8 ensures the model generates enough tokens for complete speech
+        # while still allowing natural EOS for texts spoken faster than average.
+        text_token_ids = self.trt_llm_tokenizer.encode(text)
+        min_by_tokens = len(text_token_ids) * 2
+        min_by_chars = int(len(text) * 1.7)
+        min_new_tokens = max(min_by_tokens, min_by_chars)
+        
+        logging.debug(
+            f'TRT-LLM: text_len={len(text)}, text_tokens={len(text_token_ids)}, '
+            f'min_new_tokens={min_new_tokens} (tok={min_by_tokens}, char={min_by_chars}), '
+            f'max_new_tokens={max_new_tokens}'
+        )
         
         # Generate (non-streaming)
         llm_gen_start = time.time()
@@ -1072,6 +1109,7 @@ class FastCosyVoice3:
                     top_k=sampling,
                     top_p=0.95,
                     repetition_penalty=1.1,
+                    min_tokens=min_new_tokens,
                     num_return_sequences=1,
                     streaming=False,
                     output_sequence_lengths=True,

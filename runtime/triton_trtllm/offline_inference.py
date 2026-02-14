@@ -349,7 +349,7 @@ def main(args):
             max_output_len=2048,
             enable_context_fmha_fp32_acc=False,
             max_batch_size=args.batch_size,
-            max_input_len=512,
+            max_input_len=1024,
             kv_cache_free_gpu_memory_fraction=args.kv_cache_free_gpu_memory_fraction,
             cuda_graph_mode=False,
             gather_generation_logits=False,
