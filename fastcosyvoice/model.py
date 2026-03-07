@@ -152,7 +152,10 @@ class FastCosyVoice3Model:
         llm_embedding: torch.Tensor,
         tokens_list: list,
         llm_end_flag: dict,
-        tokens_lock: threading.Lock
+        tokens_lock: threading.Lock,
+        temperature: float = 1.0,
+        top_p=None,
+        top_k=None,
     ):
         """
         LLM token generation - runs in dedicated thread with its own CUDA stream.
@@ -182,6 +185,9 @@ class FastCosyVoice3Model:
                     prompt_speech_token=prompt_speech_token_gpu,
                     prompt_speech_token_len=prompt_speech_token_len_gpu,
                     embedding=embedding_gpu,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
                 ):
                     with tokens_lock:
                         tokens_list.append(token)
@@ -212,7 +218,7 @@ class FastCosyVoice3Model:
         prompt_feat_gpu: torch.Tensor,
         prompt_feat_len_gpu: torch.Tensor,
         flow_embedding_gpu: torch.Tensor,
-        prompt_token_pad: int
+        prompt_token_pad: int,
     ):
         """
         Flow + Hift processing - runs in dedicated thread.
@@ -373,6 +379,9 @@ class FastCosyVoice3Model:
         llm_prompt_speech_token: torch.Tensor = torch.zeros(1, 0, dtype=torch.int32),
         flow_prompt_speech_token: torch.Tensor = torch.zeros(1, 0, dtype=torch.int32),
         prompt_speech_feat: torch.Tensor = torch.zeros(1, 0, 80),
+        temperature: float = 1.0,
+        top_p=None,
+        top_k=None,
         **kwargs
     ) -> Generator[Dict[str, torch.Tensor], None, None]:
         """
@@ -411,6 +420,7 @@ class FastCosyVoice3Model:
             target=self._llm_job,
             args=(text, prompt_text, llm_prompt_speech_token, llm_embedding, 
                   tokens, llm_end_flag, tokens_lock),
+            kwargs={'temperature': temperature, 'top_p': top_p, 'top_k': top_k},
             daemon=True
         )
         
@@ -535,6 +545,9 @@ class FastCosyVoice3Model:
         flow_prompt_speech_token: torch.Tensor = torch.zeros(1, 0, dtype=torch.int32),
         prompt_speech_feat: torch.Tensor = torch.zeros(1, 0, 80),
         speed: float = 1.0,
+        temperature: float = 1.0,
+        top_p=None,
+        top_k=None,
         **kwargs
     ) -> Dict[str, torch.Tensor]:
         """
@@ -567,6 +580,7 @@ class FastCosyVoice3Model:
             target=self._llm_job,
             args=(text, prompt_text, llm_prompt_speech_token, llm_embedding,
                   tokens, llm_end_flag, tokens_lock),
+            kwargs={'temperature': temperature, 'top_p': top_p, 'top_k': top_k},
             daemon=True
         )
         llm_thread.start()

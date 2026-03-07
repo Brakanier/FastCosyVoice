@@ -23,7 +23,7 @@ from torch import nn
 import torch.nn.functional as F
 from transformers import Qwen2ForCausalLM
 from torch.nn.utils.rnn import pad_sequence, unpad_sequence
-from cosyvoice.utils.common import IGNORE_ID
+from cosyvoice.utils.common import IGNORE_ID, ras_sampling
 from cosyvoice.transformer.label_smoothing_loss import LabelSmoothingLoss
 from cosyvoice.utils.common import th_accuracy
 from cosyvoice.utils.file_utils import logging
@@ -152,10 +152,19 @@ class TransformerLM(torch.nn.Module):
             decoded_tokens: List,
             sampling: int,
             ignore_eos: bool = True,
+            top_p: float | None = None,
+            top_k: int | None = None,
     ):
         num_trials, max_trials = 0, 100
         while True:
-            top_ids = self.sampling(weighted_scores, decoded_tokens, sampling)
+            if top_p is not None or top_k is not None:
+                top_ids = ras_sampling(
+                    weighted_scores, decoded_tokens, sampling,
+                    top_p=top_p if top_p is not None else 0.8,
+                    top_k=top_k if top_k is not None else 25,
+                )
+            else:
+                top_ids = self.sampling(weighted_scores, decoded_tokens, sampling)
             if (not ignore_eos) or (top_ids < self.speech_token_size):
                 break
             num_trials += 1
@@ -486,10 +495,13 @@ class Qwen2LM(TransformerLM):
             yield token
 
     @torch.inference_mode()
-    def inference_wrapper(self, lm_input, sampling, min_len, max_len, uuid):
+    def inference_wrapper(self, lm_input, sampling, min_len, max_len, uuid,
+                          temperature=1.0, top_p=None, top_k=None):
         if hasattr(self, 'vllm'):
             from vllm import SamplingParams, RequestOutput
-            sampling_params = SamplingParams(top_k=sampling,
+            sampling_params = SamplingParams(top_k=top_k if top_k is not None else sampling,
+                                             top_p=top_p if top_p is not None else 1.0,
+                                             temperature=temperature,
                                              stop_token_ids=self.stop_token_ids,
                                              min_tokens=min_len,
                                              max_tokens=max_len)
@@ -525,8 +537,11 @@ class Qwen2LM(TransformerLM):
                 cache_len = 0 if cache is None else cache[0][0].size(2)
                 attn_mask = torch.ones((1, cache_len + lm_input.shape[1]), device=lm_input.device, dtype=torch.bool)
                 y_pred, cache = self.llm.forward_one_step(lm_input, masks=attn_mask, cache=cache)
-                logp = self.llm_decoder(y_pred[:, -1]).log_softmax(dim=-1)
-                top_ids = self.sampling_ids(logp.squeeze(dim=0), out_tokens, sampling, ignore_eos=True if i < min_len else False)
+                logits = self.llm_decoder(y_pred[:, -1])
+                logp = (logits / temperature).log_softmax(dim=-1)
+                top_ids = self.sampling_ids(logp.squeeze(dim=0), out_tokens, sampling,
+                                            ignore_eos=True if i < min_len else False,
+                                            top_p=top_p, top_k=top_k)
                 if top_ids in self.stop_token_ids:
                     break
                 # in stream mode, yield token one by one
@@ -733,6 +748,9 @@ class CosyVoice3LM(Qwen2LM):
             max_token_text_ratio: float = 20,
             min_token_text_ratio: float = 2,
             uuid: str = '',
+            temperature: float = 1.0,
+            top_p: float | None = None,
+            top_k: int | None = None,
     ) -> Generator[torch.Tensor, None, None]:
         device = text.device
         text = torch.concat([prompt_text, text], dim=1)
@@ -753,5 +771,6 @@ class CosyVoice3LM(Qwen2LM):
         max_len = int((text_len - prompt_text_len) * max_token_text_ratio)
 
         # 5. step by step decode
-        for token in self.inference_wrapper(lm_input, sampling, min_len, max_len, uuid):
+        for token in self.inference_wrapper(lm_input, sampling, min_len, max_len, uuid,
+                                            temperature=temperature, top_p=top_p, top_k=top_k):
             yield token

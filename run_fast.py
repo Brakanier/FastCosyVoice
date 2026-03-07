@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 MODEL_DIR = 'pretrained_models/Fun-CosyVoice3-0.5B'
 
 # Reference audio file (3-10 sec, clean recording)
-REFERENCE_AUDIO = 'refs/audio.wav'
+REFERENCE_AUDIO = 'refs/019.wav'
 
 # Output directory
 OUTPUT_DIR = 'output/run_fast'
@@ -62,6 +62,14 @@ TRT_LLM_DTYPE = 'bfloat16'  # bfloat16/float16/float32
 # Max tokens in KV-cache. 8192 tokens ≈ 100MB for Qwen2-0.5B.
 # Minimum needed: max_input_len + max_output_len = 1024 + 2048 = 3072 tokens.
 TRT_LLM_KV_CACHE_TOKENS = 8192
+
+# LLM weights: 'llm.pt' (baseline) or 'llm.rl.pt' (RL-trained)
+LLM_MODEL_NAME = 'llm.pt'
+
+# LLM sampling parameters
+TEMPERATURE = 0.8     # Lower = more deterministic, higher = more random
+TOP_P = 0.95          # Nucleus sampling threshold (0.0-1.0)
+TOP_K = 25            # Top-K sampling limit
 
 # Inference wrapper without autograd (reduces allocations and graph leak risk)
 USE_INFERENCE_MODE = True
@@ -149,6 +157,9 @@ def warmup_model(
             prompt_text=prompt_text,
             prompt_wav=REFERENCE_AUDIO,
             zero_shot_spk_id=spk_id,
+            temperature=TEMPERATURE,
+            top_p=TOP_P,
+            top_k=TOP_K,
         ):
             pass  # Just generate all chunks
     
@@ -163,6 +174,9 @@ def warmup_model(
             prompt_text=prompt_text,
             prompt_wav=REFERENCE_AUDIO,
             zero_shot_spk_id=spk_id,
+            temperature=TEMPERATURE,
+            top_p=TOP_P,
+            top_k=TOP_K,
         ):
             pass
     
@@ -207,6 +221,9 @@ def synthesize_streaming(
             prompt_text=prompt_text,
             prompt_wav=REFERENCE_AUDIO,
             zero_shot_spk_id=spk_id,
+            temperature=TEMPERATURE,
+            top_p=TOP_P,
+            top_k=TOP_K,
         ):
             chunk_count += 1
 
@@ -270,6 +287,7 @@ def main():
     print("\n🔧 Loading FastCosyVoice3...")
     print(f"   - TensorRT Flow: {'✅' if USE_TRT_FLOW else '❌'}")
     print(f"   - TensorRT-LLM:  {'✅' if USE_TRT_LLM else '❌'} (dtype={TRT_LLM_DTYPE})")
+    print(f"   - LLM weights:   {LLM_MODEL_NAME}")
     
     load_start = time.time()
     
@@ -280,6 +298,7 @@ def main():
         load_trt_llm=USE_TRT_LLM,    # TensorRT-LLM for LLM (~3x speedup)
         trt_llm_dtype=TRT_LLM_DTYPE,
         trt_llm_kv_cache_tokens=TRT_LLM_KV_CACHE_TOKENS,
+        llm_model_name=LLM_MODEL_NAME,
     )
     
     load_time = time.time() - load_start
@@ -338,6 +357,9 @@ def main():
             prompt_text=prompt_text,
             prompt_wav=REFERENCE_AUDIO,
             zero_shot_spk_id=spk_id,
+            temperature=TEMPERATURE,
+            top_p=TOP_P,
+            top_k=TOP_K,
         ):
             pass
         if torch.cuda.is_available():

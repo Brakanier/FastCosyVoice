@@ -95,6 +95,11 @@ class FastCosyVoice3:
         trt_llm_max_batch_size: int = 1,
         trt_llm_kv_cache_tokens: int = 8192,
         flow_n_timesteps: int = 10,
+        llm_model_name: str = 'llm.pt',
+        temperature: float = 0.8,
+        top_p: float = 0.95,
+        top_k: int = 25,
+        speed: float = 1.0,
     ):
         """
         Initialize FastCosyVoice3 with parallel pipeline.
@@ -109,10 +114,19 @@ class FastCosyVoice3:
             trt_llm_max_batch_size: Max batch size for TRT-LLM engine
             trt_llm_kv_cache_tokens: Max tokens in KV cache (~100MB default, ~12KB/token)
             flow_n_timesteps: Number of diffusion steps for Flow (10=best quality, 5-6=faster)
+            llm_model_name: LLM weights filename (e.g. 'llm.pt' or 'llm.rl.pt')
+            temperature: LLM sampling temperature (lower=more deterministic, higher=more random)
+            top_p: Nucleus sampling threshold (0.0-1.0, lower=fewer candidates)
+            top_k: Top-K sampling limit (number of top candidates to consider)
+            speed: Speech speed multiplier (1.0=normal, <1.0=slower, >1.0=faster)
         """
         self.model_dir = model_dir
         self.fp16 = fp16
         self.trt_llm_loaded = False
+        self.temperature = temperature
+        self.top_p = top_p
+        self.top_k = top_k
+        self.speed = speed
         
         # Download model if not exists
         if not os.path.exists(model_dir):
@@ -170,7 +184,7 @@ class FastCosyVoice3:
             fp16
         )
 
-        llm_pt_path = os.path.join(model_dir, 'llm.pt')
+        llm_pt_path = os.path.join(model_dir, llm_model_name)
         flow_pt_path = os.path.join(model_dir, 'flow.pt')
         hift_pt_path = os.path.join(model_dir, 'hift.pt')
 
@@ -241,6 +255,27 @@ class FastCosyVoice3:
             self._accentor.to(device=device)
             logging.info(f'Loaded silero-stress accentor on {device}')
         return self._accentor
+    
+    def set_sampling_params(
+        self,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+    ):
+        """Update default LLM sampling parameters for subsequent inference calls."""
+        if temperature is not None:
+            self.temperature = temperature
+        if top_p is not None:
+            self.top_p = top_p
+        if top_k is not None:
+            self.top_k = top_k
+    
+    def set_speed(self, speed: float):
+        """Update default speech speed for subsequent inference_zero_shot() calls.
+        
+        Note: speed adjustment only works in non-streaming mode (inference_zero_shot).
+        """
+        self.speed = speed
     
     def _process_stress(self, text: str, auto_stress: bool = True) -> str:
         """
@@ -702,6 +737,9 @@ class FastCosyVoice3:
         prompt_text: str,
         prompt_speech_tokens: list,
         sampling: int = 25,
+        temperature: float = 0.8,
+        top_p: float = 0.95,
+        top_k: int = 25,
     ) -> Generator[int, None, None]:
         """
         Run LLM inference using TRT-LLM with TRUE STREAMING.
@@ -770,9 +808,9 @@ class FastCosyVoice3:
                     max_new_tokens=max_new_tokens,
                     end_id=self.eos1_token_id,
                     pad_id=self.eos1_token_id,
-                    temperature=0.8,
-                    top_k=sampling,
-                    top_p=0.95,
+                    temperature=temperature,
+                    top_k=top_k,
+                    top_p=top_p,
                     repetition_penalty=1.1,
                     min_tokens=min_new_tokens,
                     num_return_sequences=1,
@@ -823,6 +861,9 @@ class FastCosyVoice3:
         llm_end_flag: dict,
         tokens_lock,
         sampling: int = 25,
+        temperature: float = 0.8,
+        top_p: float = 0.95,
+        top_k: int = 25,
     ):
         """
         TRT-LLM token generation job - runs in dedicated thread.
@@ -837,6 +878,9 @@ class FastCosyVoice3:
                 prompt_text=prompt_text,
                 prompt_speech_tokens=prompt_speech_tokens,
                 sampling=sampling,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
             ):
                 with tokens_lock:
                     tokens_list.append(speech_token)
@@ -925,6 +969,9 @@ class FastCosyVoice3:
         zero_shot_spk_id: str = '',
         text_frontend: bool = True,
         auto_stress: bool = False,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
     ) -> Generator[bytes, None, None]:
         """
         Zero-shot streaming TTS inference with parallel pipeline.
@@ -933,6 +980,9 @@ class FastCosyVoice3:
         Audio chunks are yielded as soon as they're ready.
         
         If TRT-LLM is loaded, uses TensorRT-LLM for LLM inference (~3x faster).
+        
+        Note: speed adjustment is not supported in streaming mode (requires full
+        mel-spectrogram for interpolation). Use inference_zero_shot() for speed control.
         
         Args:
             tts_text: Text to synthesize
@@ -943,10 +993,17 @@ class FastCosyVoice3:
             auto_stress: Whether to apply automatic stress marks for Russian text
                          (uses silero-stress). Stress marks in + format are always
                          converted to Unicode U+0301 regardless of this setting.
+            temperature: LLM sampling temperature (None=use instance default)
+            top_p: Nucleus sampling threshold (None=use instance default)
+            top_k: Top-K sampling limit (None=use instance default)
         
         Yields:
             Raw PCM bytes (int16, little-endian, mono, sample_rate from model)
         """
+        temperature = temperature if temperature is not None else self.temperature
+        top_p = top_p if top_p is not None else self.top_p
+        top_k = top_k if top_k is not None else self.top_k
+        
         # Process stress marks (auto + manual conversion)
         tts_text = self._process_stress(tts_text, auto_stress)
         #prompt_text = self._process_stress(prompt_text, auto_stress)
@@ -993,6 +1050,7 @@ class FastCosyVoice3:
                     target=self._trt_llm_job,
                     args=(text_chunk, prompt_text, prompt_speech_tokens,
                           tokens_list, llm_end_flag, tokens_lock),
+                    kwargs={'temperature': temperature, 'top_p': top_p, 'top_k': top_k},
                     daemon=True
                 )
                 llm_thread.start()
@@ -1016,7 +1074,10 @@ class FastCosyVoice3:
                 llm_thread.join(timeout=5.0)
             else:
                 # Use PyTorch LLM with parallel pipeline
-                for model_output in self.model.tts_stream(**model_input):
+                for model_output in self.model.tts_stream(
+                    **model_input,
+                    temperature=temperature, top_p=top_p, top_k=top_k,
+                ):
                     audio_tensor = model_output['tts_speech']
                     speech_len = audio_tensor.shape[1] / self.sample_rate
                     elapsed = time.time() - start_time
@@ -1033,6 +1094,9 @@ class FastCosyVoice3:
         prompt_text: str,
         prompt_speech_tokens: list,
         sampling: int = 25,
+        temperature: float = 0.8,
+        top_p: float = 0.95,
+        top_k: int = 25,
     ) -> list:
         """
         Run LLM inference using TRT-LLM (non-streaming).
@@ -1097,9 +1161,9 @@ class FastCosyVoice3:
                     max_new_tokens=max_new_tokens,
                     end_id=self.eos1_token_id,
                     pad_id=self.eos1_token_id,
-                    temperature=0.8,
-                    top_k=sampling,
-                    top_p=0.95,
+                    temperature=temperature,
+                    top_k=top_k,
+                    top_p=top_p,
                     repetition_penalty=1.1,
                     min_tokens=min_new_tokens,
                     num_return_sequences=1,
@@ -1137,8 +1201,11 @@ class FastCosyVoice3:
         prompt_wav: str,
         zero_shot_spk_id: str = '',
         text_frontend: bool = True,
-        speed: float = 1.0,
+        speed: float | None = None,
         auto_stress: bool = False,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
     ) -> Generator[bytes, None, None]:
         """
         Zero-shot non-streaming TTS inference.
@@ -1155,15 +1222,23 @@ class FastCosyVoice3:
             prompt_wav: Path to prompt audio file
             zero_shot_spk_id: Optional speaker ID (if already registered)
             text_frontend: Whether to apply text normalization
-            speed: Speech speed multiplier (1.0 = normal)
+            speed: Speech speed multiplier (None=use instance default)
             auto_stress: Whether to apply automatic stress marks for Russian text
                          (uses silero-stress). Stress marks in + format are always
                          converted to Unicode U+0301 regardless of this setting.
+            temperature: LLM sampling temperature (None=use instance default)
+            top_p: Nucleus sampling threshold (None=use instance default)
+            top_k: Top-K sampling limit (None=use instance default)
         
         Yields:
             Raw PCM bytes (int16, little-endian, mono, sample_rate from model)
             (yields one chunk per text segment after normalization/splitting)
         """
+        temperature = temperature if temperature is not None else self.temperature
+        top_p = top_p if top_p is not None else self.top_p
+        top_k = top_k if top_k is not None else self.top_k
+        speed = speed if speed is not None else self.speed
+        
         # Process stress marks (auto + manual conversion)
         tts_text = self._process_stress(tts_text, auto_stress)
         prompt_text = self._process_stress(prompt_text, auto_stress)
@@ -1203,6 +1278,9 @@ class FastCosyVoice3:
                     text=text_chunk,
                     prompt_text=prompt_text,
                     prompt_speech_tokens=prompt_speech_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
                 )
                 
                 # Convert tokens to audio in one pass
@@ -1220,7 +1298,10 @@ class FastCosyVoice3:
                 yield self._tensor_to_pcm_bytes(audio_tensor)
             else:
                 # Use PyTorch LLM (non-streaming)
-                model_output = self.model.tts(**model_input, speed=speed)
+                model_output = self.model.tts(
+                    **model_input, speed=speed,
+                    temperature=temperature, top_p=top_p, top_k=top_k,
+                )
                 
                 audio_tensor = model_output['tts_speech']
                 speech_len = audio_tensor.shape[1] / self.sample_rate
