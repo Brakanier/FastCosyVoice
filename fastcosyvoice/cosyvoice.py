@@ -1088,6 +1088,110 @@ class FastCosyVoice3:
             
             # Note: model_input tensors freed automatically when out of scope
     
+    def inference_cross_lingual_stream(
+        self,
+        tts_text: str,
+        prompt_wav: str,
+        zero_shot_spk_id: str = '',
+        text_frontend: bool = True,
+        auto_stress: bool = False,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+    ) -> Generator[bytes, None, None]:
+        """
+        Cross-lingual streaming TTS inference with parallel pipeline.
+        
+        Synthesizes text in any language using the voice from prompt audio,
+        even if the prompt audio is in a different language. Unlike zero-shot,
+        the LLM receives no prompt text or speech tokens -- only the target text.
+        Flow conditioning (speaker embedding, speech features) is preserved to
+        maintain the target voice characteristics.
+        
+        If TRT-LLM is loaded, uses TensorRT-LLM for LLM inference (~3x faster).
+        
+        Note: speed adjustment is not supported in streaming mode (requires full
+        mel-spectrogram for interpolation). Use inference_cross_lingual() for speed control.
+        
+        Args:
+            tts_text: Text to synthesize (can be in any supported language)
+            prompt_wav: Path to prompt audio file (voice reference, any language)
+            zero_shot_spk_id: Optional speaker ID (if already registered)
+            text_frontend: Whether to apply text normalization
+            auto_stress: Whether to apply automatic stress marks for Russian text
+            temperature: LLM sampling temperature (None=use instance default)
+            top_p: Nucleus sampling threshold (None=use instance default)
+            top_k: Top-K sampling limit (None=use instance default)
+        
+        Yields:
+            Raw PCM bytes (int16, little-endian, mono, sample_rate from model)
+        """
+        temperature = temperature if temperature is not None else self.temperature
+        top_p = top_p if top_p is not None else self.top_p
+        top_k = top_k if top_k is not None else self.top_k
+        
+        tts_text = self._process_stress(tts_text, auto_stress)
+        
+        for text_chunk in tqdm(
+            self.frontend.text_normalize(tts_text, split=True, text_frontend=text_frontend),
+            desc='Synthesizing (cross-lingual)'
+        ):
+            model_input = self.frontend.frontend_cross_lingual(
+                text_chunk, prompt_wav, self.sample_rate, zero_shot_spk_id
+            )
+            
+            start_time = time.time()
+            logging.info(f'Synthesizing (cross-lingual): {text_chunk}')
+            
+            if self.trt_llm_loaded:
+                tokens_list: list = []
+                tokens_lock = threading.Lock()
+                llm_end_flag = {'done': False}
+                
+                llm_thread = threading.Thread(
+                    target=self._trt_llm_job,
+                    args=(text_chunk, '', [],
+                          tokens_list, llm_end_flag, tokens_lock),
+                    kwargs={'temperature': temperature, 'top_p': top_p, 'top_k': top_k},
+                    daemon=True
+                )
+                llm_thread.start()
+                
+                for model_output in self.model.tts_stream_external_llm(
+                    tokens_list=tokens_list,
+                    tokens_lock=tokens_lock,
+                    llm_end_flag=llm_end_flag,
+                    **{k: v for k, v in model_input.items() if k.startswith('flow') or k.startswith('prompt_speech')}
+                ):
+                    audio_tensor = model_output['tts_speech']
+                    speech_len = audio_tensor.shape[1] / self.sample_rate
+                    elapsed = time.time() - start_time
+                    rtf = elapsed / speech_len if speech_len > 0 else 0
+                    logging.info(f'Yield speech len={speech_len:.3f}s, rtf={rtf:.3f}')
+                    yield self._tensor_to_pcm_bytes(audio_tensor)
+                    start_time = time.time()
+                
+                llm_thread.join(timeout=5.0)
+            else:
+                empty_prompt = torch.zeros(1, 0, dtype=torch.int32)
+                for model_output in self.model.tts_stream(
+                    text=model_input['text'],
+                    flow_embedding=model_input['flow_embedding'],
+                    llm_embedding=model_input['llm_embedding'],
+                    prompt_text=empty_prompt,
+                    llm_prompt_speech_token=empty_prompt,
+                    flow_prompt_speech_token=model_input['flow_prompt_speech_token'],
+                    prompt_speech_feat=model_input['prompt_speech_feat'],
+                    temperature=temperature, top_p=top_p, top_k=top_k,
+                ):
+                    audio_tensor = model_output['tts_speech']
+                    speech_len = audio_tensor.shape[1] / self.sample_rate
+                    elapsed = time.time() - start_time
+                    rtf = elapsed / speech_len if speech_len > 0 else 0
+                    logging.info(f'Yield speech len={speech_len:.3f}s, rtf={rtf:.3f}')
+                    yield self._tensor_to_pcm_bytes(audio_tensor)
+                    start_time = time.time()
+    
     def _run_trt_llm_inference(
         self,
         text: str,
@@ -1300,6 +1404,108 @@ class FastCosyVoice3:
                 # Use PyTorch LLM (non-streaming)
                 model_output = self.model.tts(
                     **model_input, speed=speed,
+                    temperature=temperature, top_p=top_p, top_k=top_k,
+                )
+                
+                audio_tensor = model_output['tts_speech']
+                speech_len = audio_tensor.shape[1] / self.sample_rate
+                elapsed = time.time() - start_time
+                rtf = elapsed / speech_len if speech_len > 0 else 0
+                logging.info(f'Generated speech len={speech_len:.3f}s, rtf={rtf:.3f}')
+                yield self._tensor_to_pcm_bytes(audio_tensor)
+    
+    def inference_cross_lingual(
+        self,
+        tts_text: str,
+        prompt_wav: str,
+        zero_shot_spk_id: str = '',
+        text_frontend: bool = True,
+        speed: float | None = None,
+        auto_stress: bool = False,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+    ) -> Generator[bytes, None, None]:
+        """
+        Cross-lingual non-streaming TTS inference.
+        
+        Synthesizes text in any language using the voice from prompt audio,
+        even if the prompt audio is in a different language. Unlike zero-shot,
+        the LLM receives no prompt text or speech tokens -- only the target text.
+        Flow conditioning (speaker embedding, speech features) is preserved to
+        maintain the target voice characteristics.
+        
+        Generates all speech tokens first, then converts to audio in one pass.
+        Higher latency but supports speed adjustment.
+        
+        If TRT-LLM is loaded, uses TensorRT-LLM for LLM inference (~3x faster).
+        
+        Args:
+            tts_text: Text to synthesize (can be in any supported language)
+            prompt_wav: Path to prompt audio file (voice reference, any language)
+            zero_shot_spk_id: Optional speaker ID (if already registered)
+            text_frontend: Whether to apply text normalization
+            speed: Speech speed multiplier (None=use instance default)
+            auto_stress: Whether to apply automatic stress marks for Russian text
+            temperature: LLM sampling temperature (None=use instance default)
+            top_p: Nucleus sampling threshold (None=use instance default)
+            top_k: Top-K sampling limit (None=use instance default)
+        
+        Yields:
+            Raw PCM bytes (int16, little-endian, mono, sample_rate from model)
+            (yields one chunk per text segment after normalization/splitting)
+        """
+        temperature = temperature if temperature is not None else self.temperature
+        top_p = top_p if top_p is not None else self.top_p
+        top_k = top_k if top_k is not None else self.top_k
+        speed = speed if speed is not None else self.speed
+        
+        tts_text = self._process_stress(tts_text, auto_stress)
+        
+        for text_chunk in tqdm(
+            self.frontend.text_normalize(tts_text, split=True, text_frontend=text_frontend),
+            desc='Synthesizing (cross-lingual)'
+        ):
+            model_input = self.frontend.frontend_cross_lingual(
+                text_chunk, prompt_wav, self.sample_rate, zero_shot_spk_id
+            )
+            
+            start_time = time.time()
+            logging.info(f'Synthesizing (cross-lingual): {text_chunk}')
+            
+            if self.trt_llm_loaded:
+                speech_tokens = self._run_trt_llm_inference(
+                    text=text_chunk,
+                    prompt_text='',
+                    prompt_speech_tokens=[],
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                )
+                
+                model_output = self.model.tts_with_external_tokens(
+                    tokens=speech_tokens,
+                    speed=speed,
+                    **{k: v for k, v in model_input.items() if k.startswith('flow') or k.startswith('prompt_speech')}
+                )
+                
+                audio_tensor = model_output['tts_speech']
+                speech_len = audio_tensor.shape[1] / self.sample_rate
+                elapsed = time.time() - start_time
+                rtf = elapsed / speech_len if speech_len > 0 else 0
+                logging.info(f'Generated speech len={speech_len:.3f}s, rtf={rtf:.3f}')
+                yield self._tensor_to_pcm_bytes(audio_tensor)
+            else:
+                empty_prompt = torch.zeros(1, 0, dtype=torch.int32)
+                model_output = self.model.tts(
+                    text=model_input['text'],
+                    flow_embedding=model_input['flow_embedding'],
+                    llm_embedding=model_input['llm_embedding'],
+                    prompt_text=empty_prompt,
+                    llm_prompt_speech_token=empty_prompt,
+                    flow_prompt_speech_token=model_input['flow_prompt_speech_token'],
+                    prompt_speech_feat=model_input['prompt_speech_feat'],
+                    speed=speed,
                     temperature=temperature, top_p=top_p, top_k=top_k,
                 )
                 
